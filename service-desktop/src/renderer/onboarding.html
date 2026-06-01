@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'"
+    />
+    <title data-i18n="onboarding.title">Set up your service node</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1 data-i18n="onboarding.title">Set up your service node</h1>
+      <p class="subtitle" data-i18n="onboarding.subtitle">
+        Sign in with your OmniBazaar account to run a service node.
+      </p>
+
+      <label data-i18n="onboarding.username" for="username">Username</label>
+      <input id="username" type="text" autocomplete="username" data-i18n-ph="onboarding.username" />
+
+      <label data-i18n="onboarding.password" for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" data-i18n-ph="onboarding.password" />
+
+      <button id="next" class="primary" data-i18n="onboarding.next">Continue</button>
+
+      <div id="address-box" class="address-box" hidden>
+        <span data-i18n="onboarding.derivedAddress">Your node address:</span>
+        <span id="address-value" class="mono"></span>
+        <p class="note" data-i18n="onboarding.qualificationNote">
+          The node will run when your participation score reaches 25.
+        </p>
+      </div>
+
+      <progress id="progress" max="100" value="0" hidden></progress>
+      <p id="status" class="status"></p>
+
+      <button id="start" class="primary" hidden data-i18n="onboarding.start">
+        Install dependencies &amp; start
+      </button>
+    </main>
+    <script type="module" src="onboarding.js"></script>
+  </body>
+</html>

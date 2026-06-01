@@ -1,0 +1,64 @@
+appId: com.omnibazaar.servicenode
+productName: OmniBazaar Service Node
+copyright: OmniBazaar
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the compiled launcher ships in the asar; the Validator bundle is staged
+# separately by scripts/stage-validator.js into resources/validator and shipped
+# unpacked so the supervised `node dist/service-node.js` child can execute it and
+# the Phase-4 hot updater can atomically swap the directory.
+files:
+  - dist/**/*
+  - "!**/*.map"
+
+extraResources:
+  - from: staging/validator
+    to: validator
+    filter:
+      - "**/*"
+  - from: staging/shared
+    to: shared
+    filter:
+      - "**/*"
+  - from: locales
+    to: locales
+    filter:
+      - "*.json"
+
+asar: true
+
+linux:
+  category: Network
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  artifactName: "omnibazaar-service-node-${version}-${arch}.${ext}"
+
+deb:
+  depends:
+    - libsecret-1-0
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: "omnibazaar-service-node-${version}-setup.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+mac:
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  artifactName: "omnibazaar-service-node-${version}-${arch}.${ext}"

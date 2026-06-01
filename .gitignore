@@ -4,6 +4,10 @@ dist/
 *.tsbuildinfo
 coverage/
 
+# ── service-desktop build outputs (staged Validator bundle + packaged apps) ─
+service-desktop/staging/
+service-desktop/release/
+
 # ── Secrets — NEVER commit (leak-prevention guardrail) ──────────────────
 # Private keys / wallets
 *.pk

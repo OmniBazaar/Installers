@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'"
+    />
+    <title data-i18n="dashboard.title">Service Node</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1 data-i18n="dashboard.title">Service Node</h1>
+
+      <div class="status-row">
+        <span id="status-indicator" class="indicator stopped"></span>
+        <span data-i18n="dashboard.status">Status:</span>
+        <span id="status-label" class="mono"></span>
+      </div>
+
+      <div class="actions">
+        <button id="start" class="primary" data-i18n="tray.action.start">Start</button>
+        <button id="stop" class="secondary" data-i18n="tray.action.stop" hidden>Stop</button>
+        <button id="dashboard-link" class="secondary" data-i18n="tray.action.dashboard">
+          Open Dashboard
+        </button>
+        <button id="logs-link" class="secondary" data-i18n="tray.action.logs">View Logs</button>
+      </div>
+
+      <label class="checkbox">
+        <input id="autostart" type="checkbox" />
+        <span data-i18n="tray.action.autostart">Start on login</span>
+      </label>
+
+      <div class="updates">
+        <button id="check-updates" class="secondary" data-i18n="tray.action.checkUpdates">
+          Check for Updates
+        </button>
+        <p id="update-result" class="status"></p>
+      </div>
+    </main>
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>

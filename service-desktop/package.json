@@ -1,0 +1,25 @@
+{
+  "name": "@omnibazaar/service-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform desktop launcher for an OmniBazaar service node (onboarding, dependency provisioning, supervised service-node.js, tray UI).",
+  "license": "UNLICENSED",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/copy-renderer-assets.js",
+    "type-check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "test": "jest",
+    "stage:validator": "node scripts/stage-validator.js",
+    "start": "electron .",
+    "dist:linux": "npm run build && npm run stage:validator && electron-builder --linux",
+    "dist:win": "npm run build && npm run stage:validator && electron-builder --win",
+    "dist:mac": "npm run build && npm run stage:validator && electron-builder --mac"
+  },
+  "dependencies": {
+    "i18next": "^23.0.0"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}
