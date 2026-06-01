@@ -76,3 +76,22 @@ needed on V1.)
 - As of this writing **no `validator`/`service-node` release is published on
   mainnet** — `verifyArtifact` returns `ok:false` ("No on-chain release found")
   until the first `publishRelease` lands.
+- **`Validator/scripts/install-gateway-validator.sh` and its
+  `systemd/omnicoin-validator.service` template are fuji/dev-era and have
+  diverged from the live mainnet units**, so they cannot be wrapped as-is:
+  - `AVALANCHEGO_VERSION="v1.14.0-fuji"` (mainnet runs avalanchego `v1.14.1`).
+  - `NETWORK="fuji"` + a fuji blockchain-ID RPC. Mainnet is chain `88008`,
+    blockchain-ID `B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK`, public
+    RPC `https://rpc.omnicoin.net` (verified against `omnicoin-integration.ts`
+    and the live `omnicoin-validator-1.service`).
+  - The template's `ExecStart` runs `dist/service-node.js` and exports
+    `RPC_URL`, but the live gateway unit runs `dist/gateway-validator.js` and
+    exports `AVALANCHE_RPC_URL`.
+  - The live units set `SKIP_VALIDATOR_AUTH=true` (a founder-internal
+    bootstrap shortcut). A permissionless external gateway MUST instead enforce
+    qualification: `GATEWAY_MIN_STAKING=1000000`, `GATEWAY_MIN_PARTICIPATION=50`,
+    `GATEWAY_MIN_KYC=3`.
+  Phase 1 therefore parameterizes the installer (mainnet values opt-in, fuji
+  defaults preserved so nothing breaks) and generates a unit modeled on the
+  live production unit — pending confirmation of the external-validator
+  P-Chain self-registration posture on the PoS subnet.
