@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Debian/RPM post-install: run the bundled gateway installer non-interactively.
+# Operator config is read from /etc/omnibazaar/gateway.env (see gateway.env.example).
+set -e
+
+INSTALL_ROOT="/opt/omnicoin-validator"
+CFG="/etc/omnibazaar/gateway.env"
+INSTALLER="$INSTALL_ROOT/Validator/scripts/install-gateway-validator.sh"
+
+if [ ! -f "$CFG" ]; then
+  echo "OmniBazaar: no $CFG found."
+  echo "Create it from $INSTALL_ROOT/gateway.env.example, then run:"
+  echo "  sudo OBZ_NONINTERACTIVE=1 OBZ_SKIP_BUILD=1 bash $INSTALLER"
+  exit 0
+fi
+
+# shellcheck disable=SC1090
+set -a; . "$CFG"; set +a
+
+# Files are already placed by the package manager; ship pre-built dist/, so skip
+# the code-copy (dir already exists) and the npm build.
+export OBZ_NONINTERACTIVE=1
+export OBZ_SKIP_BUILD=1
+export OBZ_INSTALL_DIR="$INSTALL_ROOT"
+export OBZ_NETWORK="${OBZ_NETWORK:-mainnet}"
+
+bash "$INSTALLER"

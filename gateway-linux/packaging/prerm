@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Debian/RPM pre-remove: stop the gateway services before files are removed.
+set -e
+systemctl stop omnicoin-validator.service 2>/dev/null || true
+systemctl stop avalanchego.service 2>/dev/null || true
+exit 0
