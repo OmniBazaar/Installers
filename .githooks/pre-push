@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Pre-push guardrail: re-scan all tracked files before they leave the machine.
+# Enabled via `git config core.hooksPath .githooks`.
+set -e
+DIR="$(git rev-parse --show-toplevel)"
+exec bash "$DIR/scripts/secret-scan.sh" --tracked

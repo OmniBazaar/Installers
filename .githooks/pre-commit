@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Pre-commit guardrail: block commits that introduce secrets.
+# Enabled via `git config core.hooksPath .githooks`.
+set -e
+DIR="$(git rev-parse --show-toplevel)"
+exec bash "$DIR/scripts/secret-scan.sh" --staged

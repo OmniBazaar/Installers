@@ -1,0 +1,35 @@
+# ── Build / deps ────────────────────────────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# ── Secrets — NEVER commit (leak-prevention guardrail) ──────────────────
+# Private keys / wallets
+*.pk
+*.pem
+*.key
+*.keystore
+*id_rsa*
+deployer*
+wallet.env
+keys/
+signatures/
+
+# Environment files (may contain DB_PASSWORD, signer keys, tokens)
+.env
+.env.*
+*.env
+
+# ── Built installer artifacts (hosted via GitHub Releases, not git) ──────
+*.deb
+*.rpm
+*.exe
+*.dmg
+*.AppImage
+*.snap
+release-artifacts/
+
+# ── OS / editor noise ────────────────────────────────────────────────────
+.DS_Store
+*.log

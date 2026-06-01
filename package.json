@@ -1,0 +1,25 @@
+{
+  "name": "@omnibazaar/installers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Signed, self-configuring installers and hot-update tooling for OmniBazaar gateway validators and service nodes.",
+  "license": "UNLICENSED",
+  "bin": {
+    "omnibazaar-artifact": "./dist/shared/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "ethers": "^6.16.0"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/node": "24.3.1",
+    "jest": "29.7.0",
+    "ts-jest": "29.4.1",
+    "typescript": "5.9.2"
+  }
+}
