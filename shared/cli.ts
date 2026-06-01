@@ -9,6 +9,11 @@
  *   verify <file> --component <id> [--version <semver>] [--rpc <url>] [--registry <addr>]
  *       Verify <file> against the on-chain UpdateRegistry record. Exit 0 when
  *       authentic, 1 when not, 2 on bad usage.
+ *   latest --component <id> [--rpc <url>] [--registry <addr>]
+ *       Print the latest on-chain release for <id> as a single JSON line
+ *       ({version, binaryHash, minimumVersion, revoked}). Exit 0 on success,
+ *       1 when no release is found, 2 on bad usage. Consumed by the desktop
+ *       launcher's update check and the Phase-4 updater.
  *
  * @module shared/cli
  */
@@ -126,6 +131,46 @@ async function runVerify(
 }
 
 /**
+ * Handle the `latest` command: print the latest on-chain release as JSON.
+ * @param flags - Parsed flags (`component`, `rpc`, `registry`).
+ * @returns Process exit code.
+ */
+async function runLatest(flags: Record<string, string>): Promise<number> {
+  const component = flags["component"];
+  if (component === undefined) {
+    errOut(
+      "usage: omnibazaar-artifact latest --component <id> [--rpc <url>] [--registry <addr>]",
+    );
+    return 2;
+  }
+  const reader = new EthersReleaseReader({
+    ...(flags["rpc"] !== undefined && { rpcUrl: flags["rpc"] }),
+    ...(flags["registry"] !== undefined && {
+      registryAddress: flags["registry"],
+    }),
+  });
+  try {
+    const release = await reader.getLatestRelease(component);
+    out(
+      JSON.stringify({
+        version: release.version,
+        binaryHash: release.binaryHash,
+        minimumVersion: release.minimumVersion,
+        revoked: release.revoked,
+      }),
+    );
+    return 0;
+  } catch (e) {
+    errOut(
+      JSON.stringify({
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return 1;
+  }
+}
+
+/**
  * CLI entry point.
  * @returns Process exit code.
  */
@@ -137,8 +182,10 @@ async function main(): Promise<number> {
       return runHash(positionals[1]);
     case "verify":
       return runVerify(positionals[1], flags);
+    case "latest":
+      return runLatest(flags);
     default:
-      errOut("usage: omnibazaar-artifact <hash|verify> ...");
+      errOut("usage: omnibazaar-artifact <hash|verify|latest> ...");
       return 2;
   }
 }
