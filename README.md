@@ -100,19 +100,17 @@ linux packages; service-desktop Electron app (i18n ×10); release scripts
 **repointed to mainnet** (chain `88008`, `UpdateRegistry 0xA5eb4BF4…`);
 `OmniUpdaterService` built, tested, and wired into both entry points (opt-in).
 
+Both installers now establish the **symlink release layout** (`current` → the
+installed `Validator/` tree + a `releases/` dir) and bake the updater env into
+the systemd unit, so `OmniUpdaterService` can atomically hot-swap; the gateway
+now derives its wallet from `STAKING_USERNAME`/`STAKING_PASSWORD` like the
+service node (the Phase-1 credential gap is closed). Auto-application stays
+**opt-in** (`OBZ_AUTO_UPDATE_MANDATORY`/`OBZ_AUTO_UPDATE_OPTIONAL`, default off).
+
 Remaining / known caveats:
 - **No `validator`/`service-node` release is published on mainnet yet** —
   `verifyArtifact` returns `ok:false` ("No on-chain release found") until the
   first `publishRelease` lands. Auto-update is therefore inert until then.
-- **Auto-update needs a symlink release layout** (`releases/<ver>/` + a
-  `current` symlink). The current packages install to a real `Validator/` dir;
-  converting the package layout to the symlink scheme is a deliberate follow-up
-  (the wiring + env knobs are ready and documented in the `*.env.example`s).
-- **Gateway username/password onboarding gap**: `install-gateway-validator.sh`
-  option 1 writes `VALIDATOR_USERNAME`/`PASSWORD`, but `gateway-validator.ts`
-  reads only `VALIDATOR_WALLET_PRIVATE_KEY` for its own wallet — so the gateway's
-  "staking account" path does not yet derive a usable key (the service node was
-  fixed in Phase 3 to use `STAKING_*`). Reconcile when revisiting Phase 1.
 - **External-validator P-Chain self-registration** on the PoS subnet is a guided
   manual step (decision 2026-06-01), not yet automated.
 - **OS code-signing certs** (Authenticode / Apple notarization) deferred —
