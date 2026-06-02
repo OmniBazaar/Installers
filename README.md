@@ -5,11 +5,16 @@ products:
 
 - **Gateway Validator** — headless Linux server (requires avalanchego + a
   YugabyteDB cluster + stake + KYC-3). Packaged as `.deb`/`.rpm` + a
-  `curl | bash` bootstrap that wraps the existing
-  `Validator/scripts/install-gateway-validator.sh`.
-- **Service Node** — laptop-class, anyone-runs. Packaged as a cross-platform
-  Electron desktop app (tray UI, bundled deps) and a headless Linux package
-  wrapping `Validator/scripts/install-service-node.sh`.
+  `curl | bash` bootstrap that wraps `install-gateway-validator.sh`.
+  → [`gateway-linux/`](gateway-linux/README.md)
+- **Service Node** — laptop-class, anyone-runs. Two surfaces:
+  - a cross-platform **Electron desktop app** (tray UI, onboarding, bundled
+    deps; silent WSL2 + YugabyteDB on Windows) → [`service-desktop/`](service-desktop/README.md)
+  - a **headless Linux package** wrapping `install-service-node.sh`
+    → [`service-linux/`](service-linux/README.md)
+
+All three verify every artifact against the on-chain trust anchor (below) and
+share the `shared/` verification primitives.
 
 This directory is **build/packaging tooling**; it does not change the running
 production validators, which keep their current systemd units and manual
@@ -67,31 +72,48 @@ npm run build        # tsc → dist/
 (Toolchain is hoisted from the monorepo root; no per-package `npm install`
 needed on V1.)
 
-## Known adjacent issues (surfaced, not yet fixed)
+## Release & update lifecycle (end to end)
 
-- `Coin/scripts/sign-release.js` and `publish-release.js` are **hardcoded to the
-  retired fuji testnet** (chain `131313`, `deployments/fuji.json`, a defunct
-  RPC). They must be re-pointed at mainnet (chain `88008`,
-  `UpdateRegistry 0xA5eb4BF4…`) before any release can be published on-chain.
-- As of this writing **no `validator`/`service-node` release is published on
-  mainnet** — `verifyArtifact` returns `ok:false` ("No on-chain release found")
-  until the first `publishRelease` lands.
-- **`Validator/scripts/install-gateway-validator.sh` and its
-  `systemd/omnicoin-validator.service` template are fuji/dev-era and have
-  diverged from the live mainnet units**, so they cannot be wrapped as-is:
-  - `AVALANCHEGO_VERSION="v1.14.0-fuji"` (mainnet runs avalanchego `v1.14.1`).
-  - `NETWORK="fuji"` + a fuji blockchain-ID RPC. Mainnet is chain `88008`,
-    blockchain-ID `B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK`, public
-    RPC `https://rpc.omnicoin.net` (verified against `omnicoin-integration.ts`
-    and the live `omnicoin-validator-1.service`).
-  - The template's `ExecStart` runs `dist/service-node.js` and exports
-    `RPC_URL`, but the live gateway unit runs `dist/gateway-validator.js` and
-    exports `AVALANCHE_RPC_URL`.
-  - The live units set `SKIP_VALIDATOR_AUTH=true` (a founder-internal
-    bootstrap shortcut). A permissionless external gateway MUST instead enforce
-    qualification: `GATEWAY_MIN_STAKING=1000000`, `GATEWAY_MIN_PARTICIPATION=50`,
-    `GATEWAY_MIN_KYC=3`.
-  Phase 1 therefore parameterizes the installer (mainnet values opt-in, fuji
-  defaults preserved so nothing breaks) and generates a unit modeled on the
-  live production unit — pending confirmation of the external-validator
-  P-Chain self-registration posture on the PoS subnet.
+1. **Build** the artifact (`omnibazaar-<component>-<ver>.tar.gz`) for a target.
+2. **Hash** it: `node dist/shared/cli.js hash <tarball>`.
+3. **Sign** (ODDAO signers): `Coin/scripts/sign-release.js --component <id>
+   --version <ver> --hash <0x…> [--min-version <ver>]` — defaults to mainnet
+   (chain `88008`); each signer produces a signature file.
+4. **Publish**: `npx hardhat run Coin/scripts/publish-release.js --network
+   mainnet` collects the threshold signatures and writes the `binaryHash`
+   on-chain to `UpdateRegistry`.
+5. **Detect**: every node's `UpdateCheckService` polls the registry (30 min) +
+   subscribes to `ReleasePublished`/`ReleaseRevoked` events, emitting
+   `updates:available` / `updates:mandatory` / `updates:revoked`.
+6. **Apply** (opt-in): `OmniUpdaterService` downloads the artifact, **re-verifies
+   SHA-256 against the on-chain `binaryHash`**, stages `releases/<ver>/`, swaps
+   the `current` symlink atomically, and restarts. Enable per node via
+   `OBZ_RELEASES_DIR` + `OBZ_CURRENT_LINK` (+ `OBZ_UPDATER_SYSTEMD_UNIT`,
+   `OBZ_AUTO_UPDATE_MANDATORY`); the desktop tray's "Check for Updates" drives
+   the same path. Revoke a bad release with `Coin/scripts/revoke-release.js
+   --network mainnet`.
+
+## Status & remaining work
+
+Done (Phases 0–5): `shared/` verification primitives; gateway-linux + service-
+linux packages; service-desktop Electron app (i18n ×10); release scripts
+**repointed to mainnet** (chain `88008`, `UpdateRegistry 0xA5eb4BF4…`);
+`OmniUpdaterService` built, tested, and wired into both entry points (opt-in).
+
+Remaining / known caveats:
+- **No `validator`/`service-node` release is published on mainnet yet** —
+  `verifyArtifact` returns `ok:false` ("No on-chain release found") until the
+  first `publishRelease` lands. Auto-update is therefore inert until then.
+- **Auto-update needs a symlink release layout** (`releases/<ver>/` + a
+  `current` symlink). The current packages install to a real `Validator/` dir;
+  converting the package layout to the symlink scheme is a deliberate follow-up
+  (the wiring + env knobs are ready and documented in the `*.env.example`s).
+- **Gateway username/password onboarding gap**: `install-gateway-validator.sh`
+  option 1 writes `VALIDATOR_USERNAME`/`PASSWORD`, but `gateway-validator.ts`
+  reads only `VALIDATOR_WALLET_PRIVATE_KEY` for its own wallet — so the gateway's
+  "staking account" path does not yet derive a usable key (the service node was
+  fixed in Phase 3 to use `STAKING_*`). Reconcile when revisiting Phase 1.
+- **External-validator P-Chain self-registration** on the PoS subnet is a guided
+  manual step (decision 2026-06-01), not yet automated.
+- **OS code-signing certs** (Authenticode / Apple notarization) deferred —
+  first-run "unknown publisher" warnings are expected.
