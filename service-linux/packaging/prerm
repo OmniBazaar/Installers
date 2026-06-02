@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Debian/RPM pre-remove: stop the service node before files are removed.
+set -e
+systemctl stop omnicoin-service-node.service 2>/dev/null || true
+exit 0
