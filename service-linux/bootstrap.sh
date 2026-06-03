@@ -20,7 +20,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 # ── Parameters (env-overridable) ─────────────────────────────────────────
 COMPONENT="service-node"
 VERSION="${OBZ_VERSION:-latest}"                       # explicit semver or "latest"
-RELEASE_BASE="${OBZ_RELEASE_BASE:-https://github.com/OmniBazaar/Installers/releases/download}"
+RELEASE_BASE="${OBZ_RELEASE_BASE:-https://omnibazaar.com/node-software}"
 WORK_DIR="${OBZ_WORK_DIR:-/tmp/omnibazaar-service-node-install}"
 
 echo -e "${BLUE}=== OmniBazaar Service Node bootstrap ===${NC}"
