@@ -48,7 +48,7 @@ if [[ "$VERSION" == "latest" ]]; then
   VERSION="$(node -e "
     const { ethers } = require('ethers');
     const RPC='${OMNICOIN_RPC_URL:-https://rpc.omnicoin.net}';
-    const REG='${OMNICOIN_UPDATE_REGISTRY:-0xA5eb4BF4a46B3CfAaC684818f56fD8263f79031D}';
+    const REG='${OMNICOIN_UPDATE_REGISTRY:-0x65263253647a7e9700Df642a92b6074781DCAC81}';
     const abi=['function getLatestVersion(string) view returns (string)'];
     (async()=>{const p=new ethers.JsonRpcProvider(RPC);const c=new ethers.Contract(REG,abi,p);
       process.stdout.write(await c.getLatestVersion('${COMPONENT}'));})().catch(()=>process.stdout.write(''));

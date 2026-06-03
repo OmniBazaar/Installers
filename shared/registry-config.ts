@@ -22,7 +22,7 @@ export const MAINNET_CHAIN_ID = 88008;
 
 /** Deployed UpdateRegistry proxy on OmniCoin L1 mainnet. */
 export const MAINNET_UPDATE_REGISTRY =
-  "0xA5eb4BF4a46B3CfAaC684818f56fD8263f79031D";
+  "0x65263253647a7e9700Df642a92b6074781DCAC81";
 
 /**
  * Minimal read ABI for the UpdateRegistry view functions the verifier calls.
