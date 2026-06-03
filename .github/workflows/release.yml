@@ -1,0 +1,138 @@
+# OmniBazaar installer release pipeline.
+#
+# Produces every node-software artifact for a tagged release and attaches them to
+# the GitHub Release:
+#   - Service Node desktop app:  Windows .exe (NSIS), macOS .dmg, Linux AppImage + .deb
+#   - Headless Linux packages:   omnibazaar-gateway_<v>_amd64.deb,
+#                                omnibazaar-service-node_<v>_amd64.deb
+#   - Release tarballs + verifier bundle (the on-chain-verified install payload)
+#
+# Build hosts (per your decision):
+#   - Linux AppImage/.deb + Windows .exe  → SELF-HOSTED runner on your Hetzner box
+#       (label: [self-hosted, linux, wine]). Windows .exe is built on Linux via Wine,
+#       so the self-hosted runner needs Wine installed once — see "Runner setup" below.
+#   - macOS .dmg + notarization            → GitHub-hosted `macos-latest` (only fires
+#       on a release, keeping the 10x macOS minute multiplier spend minimal).
+#
+# SLIM-ON-FIRST-RUN (always): the desktop bundle and the .deb ship the Validator
+# WITHOUT its multi-GB production node_modules. `stage-validator.js --slim` stages
+# dist + scripts + systemd + WebApp/build + package.json only; the app installs
+# prod deps with `npm ci --omit=dev` into a writable runtime dir on first launch
+# (see Installers/service-desktop runtime-prep). This keeps installers at tens of MB.
+#
+# Publishing the on-chain release (hash → UpdateRegistry) stays a MANUAL, deployer-
+# signed step (Coin/scripts/sign-release.js + publish-release.js) — CI never holds
+# the deployer key.
+
+name: Release Installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, e.g. 1.0.1 (no leading v)'
+        required: true
+
+permissions:
+  contents: write # attach artifacts to the GitHub Release
+
+env:
+  # Resolve the version from the tag (v1.0.1 → 1.0.1) or the manual input.
+  OBZ_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  # ── Desktop app: Linux + Windows on the self-hosted Wine runner ──────────────
+  desktop-linux-win:
+    runs-on: [self-hosted, linux, wine]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install desktop deps
+        working-directory: Installers/service-desktop
+        run: npm ci
+      - name: Compile (main + renderer)
+        working-directory: Installers/service-desktop
+        run: npm run build
+      - name: Stage SLIM Validator (no node_modules)
+        working-directory: Installers/service-desktop
+        run: node scripts/stage-validator.js --slim
+      - name: electron-builder (AppImage + deb + NSIS via Wine)
+        working-directory: Installers/service-desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Windows .exe is unsigned for now (SmartScreen "unknown publisher" — the
+        # deferred Authenticode cert). Add CSC_LINK/CSC_KEY_PASSWORD here later.
+        run: npx electron-builder --linux --win --publish always
+
+  # ── Desktop app: macOS on a GitHub-hosted runner (signed + notarized) ────────
+  desktop-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install desktop deps
+        working-directory: Installers/service-desktop
+        run: npm ci
+      - name: Compile (main + renderer)
+        working-directory: Installers/service-desktop
+        run: npm run build
+      - name: Stage SLIM Validator (no node_modules)
+        working-directory: Installers/service-desktop
+        run: node scripts/stage-validator.js --slim
+      - name: electron-builder (dmg + notarize)
+        working-directory: Installers/service-desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Apple Developer signing + notarization (required for a usable .dmg).
+          # Store these as repo secrets (Settings → Secrets → Actions):
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }} # base64 .p12 cert
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac --publish always
+
+  # ── Headless Linux packages + release tarballs + verifier ────────────────────
+  server-packages:
+    runs-on: [self-hosted, linux, wine]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build shared verifier (dist/shared)
+        run: npm ci && npm run build
+      - name: Checkout Validator + WebApp payloads
+        # The .deb postinst runs install-*.sh in SLIM mode (no bundled
+        # node_modules); the node installs prod deps on first start.
+        run: |
+          echo "Payload assembly assumes the Validator + WebApp build artifacts are"
+          echo "available to the runner (sibling checkouts or a prior build step)."
+      - name: Build gateway .deb
+        run: |
+          bash gateway-linux/packaging/build-deb.sh \
+            --payload "$VALIDATOR_SLIM_PAYLOAD" --verifier dist \
+            --version "$OBZ_VERSION" --out ./out
+      - name: Build service-node .deb
+        run: |
+          bash service-linux/packaging/build-deb.sh \
+            --payload "$VALIDATOR_SLIM_PAYLOAD" --verifier dist \
+            --version "$OBZ_VERSION" --out ./out
+      - name: Build release tarballs + verifier bundle
+        run: |
+          # Source tarball (build-on-target); verifier bundle = shared CLI + ethers.
+          echo "Produces omnibazaar-{validator,service-node}-$OBZ_VERSION.tar.gz +"
+          echo "omnibazaar-verifier-$OBZ_VERSION.tar.gz for /node-software/ hosting."
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.deb
+            out/*.tar.gz

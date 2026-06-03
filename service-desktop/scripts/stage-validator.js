@@ -43,15 +43,24 @@ function copyTree(src, dest) {
 }
 
 /**
- * Produce a production-only node_modules tree for the Validator without mutating
- * the developer's working tree: install with --omit=dev into the staging area.
+ * Stage the Validator's package manifest, and (unless slim) a production-only
+ * node_modules tree, without mutating the developer's working tree.
+ *
+ * In SLIM mode the manifest is staged but node_modules is NOT — the app installs
+ * prod deps with `npm ci --omit=dev` into a writable runtime dir on first launch,
+ * keeping the shipped installer tens of MB instead of GBs.
+ *
+ * @param {boolean} slim - When true, stage the manifest only (no install).
  */
-function stageProductionNodeModules() {
+function stageManifest(slim) {
   const destPkg = path.join(STAGING, "package.json");
   copyTree(path.join(VALIDATOR_DIR, "package.json"), destPkg);
   const lock = path.join(VALIDATOR_DIR, "package-lock.json");
   if (fs.existsSync(lock)) {
     copyTree(lock, path.join(STAGING, "package-lock.json"));
+  }
+  if (slim) {
+    return;
   }
   execFileSync(
     "npm",
@@ -61,6 +70,7 @@ function stageProductionNodeModules() {
 }
 
 function main() {
+  const slim = process.argv.includes("--slim");
   fs.rmSync(STAGING_ROOT, { recursive: true, force: true });
   fs.mkdirSync(STAGING, { recursive: true });
 
@@ -69,13 +79,16 @@ function main() {
   // The dependency provisioner shells out to these at runtime (Yugabyte, etc.).
   copyTree(path.join(VALIDATOR_DIR, "scripts"), path.join(STAGING, "scripts"));
   copyTree(path.join(VALIDATOR_DIR, "systemd"), path.join(STAGING, "systemd"));
-  stageProductionNodeModules();
+  stageManifest(slim);
 
-  // Stage the Phase-0 shared artifact CLI (update check); it resolves `ethers`
-  // at runtime via NODE_PATH into the Validator bundle's node_modules above.
+  // Stage the Phase-0 shared artifact CLI (update check). When not slim it
+  // resolves `ethers` via NODE_PATH into the Validator bundle's node_modules;
+  // in slim mode the first-run install populates it.
   copyTree(SHARED_DIST, STAGING_SHARED);
 
-  process.stdout.write(`Staged Validator + shared bundles into ${STAGING_ROOT}\n`);
+  process.stdout.write(
+    `Staged Validator${slim ? " (SLIM — no node_modules)" : ""} + shared bundles into ${STAGING_ROOT}\n`,
+  );
 }
 
 main();
