@@ -27,6 +27,11 @@ describe("buildServiceNodeEnv", () => {
     expect(env.HTTP_HOST).toBe("127.0.0.1");
   });
 
+  it("runs the child as plain Node under Electron (ELECTRON_RUN_AS_NODE)", () => {
+    const env = buildServiceNodeEnv(baseConfig);
+    expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
   it("passes credentials for in-node wallet derivation, never a private key", () => {
     const env = buildServiceNodeEnv(baseConfig);
     expect(env.STAKING_USERNAME).toBe("alice");

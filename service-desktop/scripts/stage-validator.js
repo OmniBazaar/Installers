@@ -79,6 +79,14 @@ function main() {
   // The dependency provisioner shells out to these at runtime (Yugabyte, etc.).
   copyTree(path.join(VALIDATOR_DIR, "scripts"), path.join(STAGING, "scripts"));
   copyTree(path.join(VALIDATOR_DIR, "systemd"), path.join(STAGING, "systemd"));
+  // The lockfile pins some deps to local `file:vendor-tarballs/*.tgz` paths
+  // (e.g. a patched libp2p-gossipsub). Those paths resolve relative to the
+  // staged package.json, so the tarballs must travel with it or `npm install`
+  // fails with ENOENT. Copy the directory verbatim when present.
+  const vendorTarballs = path.join(VALIDATOR_DIR, "vendor-tarballs");
+  if (fs.existsSync(vendorTarballs)) {
+    copyTree(vendorTarballs, path.join(STAGING, "vendor-tarballs"));
+  }
   stageManifest(slim);
 
   // Stage the Phase-0 shared artifact CLI (update check). When not slim it

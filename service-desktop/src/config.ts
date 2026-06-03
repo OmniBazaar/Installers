@@ -93,6 +93,13 @@ export function buildServiceNodeEnv(
   };
 
   return {
+    // The supervisor spawns this child with `process.execPath`, which in a
+    // packaged app is the Electron binary, not `node`. Without this flag that
+    // would launch a second Electron GUI instead of running service-node.js.
+    // service-node.js is a pure Node program (no Electron APIs), so running it
+    // as Node is correct; when nodePath is a real `node` (dev), the flag is a
+    // harmless no-op.
+    ELECTRON_RUN_AS_NODE: "1",
     NODE_ENV: "production",
     NODE_TYPE: "service",
     NODE_ID: config.nodeId,
