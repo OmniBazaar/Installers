@@ -76,37 +76,58 @@ Release scripts are repointed to mainnet (chain 88008).
 - **CI:** `.github/workflows/release.yml` drafted (self-hosted `[self-hosted,linux,wine]`
   for AppImage/deb/NSIS, GitHub `macos-latest` for dmg+notarize) + `stage-validator.js --slim`.
 
-### BLOCKERS / OPEN ITEMS (next developer)
-1. **`release.yml` not pushed** — local commit `e0ee0ca` (Installers, ahead by 1). GitHub
-   rejected the push: the cached PAT in `~/.git-credentials` (ends `…SYOG`) has scopes
-   `gist, read:org, repo` but **no `workflow`**. Fix: add `workflow` to that classic PAT at
-   github.com/settings/tokens (keeps the value → no re-cache), then `git push`. Founder is
-   handling the token.
-2. **Slim-on-first-run needs the app-side companion change.** `stage-validator.js --slim`
-   ships NO node_modules; a slim bundle currently can't run. Implement: on first launch the
-   Electron app copies `resources/validator` → writable `userData/runtime/`, runs
-   `npm ci --omit=dev` there, and the supervisor (`paths.ts` + `child-supervisor.ts`) runs
-   node from that dir. ~half-day + xvfb smoke. Until then, only the non-slim path runs.
-3. **Packaged installers (.deb/AppImage/.exe/.dmg) not built/hosted.** Blocked on (2)
-   (multi-GB node_modules) + Win/macOS build hosts. The curl-install (source tarball) is
-   the only working path today. Win .exe buildable on V1 via Wine; macOS dmg needs a Mac
-   runner (Apple Developer $99/yr for notarization, required).
-4. **`/node-software/` serving:** files are in the atomically-swapped live `build/` (served
-   by express.static) so reachable now, BUT RELEASE_BASE points at `https://omnibazaar.com`
-   — confirm that domain resolves to the validator host, or override `OBZ_RELEASE_BASE`.
-5. **OmniUpdaterService + a source tarball:** the updater expects a PRE-BUILT bundle for the
-   symlink swap; the v1.0.0 release is a SOURCE tarball (build-on-target). Auto-update is
-   off-by-default, so fine for now, but reconcile when (2) lands (ship pre-built slim).
-6. **`Coin/scripts/deploy-update-registry.js`** fix committed on branch
-   `feat/phase2-attestation` (not main) — Coin was checked out there.
+### 2026-06-04 update — git push fixed, slim de-scoped, real desktop blocker found
+
+- **(was #1) `release.yml` push — RESOLVED.** Root cause was NOT the `.git-credentials`
+  PAT (it had `workflow`). V1 git authenticates github.com via the **`gh` CLI OAuth
+  helper** (`~/.gitconfig` empty-`helper=` wipes `store` for github.com), and that
+  `gho_` token lacked `workflow`. Fixed with `gh auth refresh -h github.com -s workflow`.
+  `e0ee0ca` (release.yml) + HANDOFF are pushed; main in sync. See memory
+  `git_auth_v1_gh_credential_helper.md`.
+- **(was #2) Slim-on-first-run — DE-SCOPED (recommend non-slim for this operator app).**
+  Verified: the "multi-GB node_modules" premise is the 8.3 GB *dev monorepo*; a prod-only
+  Validator bundle is far smaller. Slim first-run would need a guaranteed `npm` (provisioner
+  installs only Yugabyte+IPFS) and would compile native modules (`bcrypt`, `sharp`) on the
+  user's machine — unacceptable for a real-money installer. Two latent build blockers were
+  fixed regardless (commit `6c2ec12`): vendor-tarballs now travel with the staged manifest;
+  the supervised child now spawns with `ELECTRON_RUN_AS_NODE` (was launching a 2nd Electron
+  GUI). Unit-tested + type-check + build green (50 tests). Not runtime-smoke-tested (no
+  electron-builder/xvfb/Win/macOS here).
+- **NEW Blocker C (real desktop-packaging blocker).** `stage-validator.js` does
+  `npm install --omit=dev` on a copied manifest in isolation; this **404s on the
+  workspace-internal unpublished dep `@omnibazaar/liquidity-config`** and is non-reproducible
+  (Validator has no own lockfile, only the root workspace lock). Staging must reproduce
+  workspace resolution (copy the resolved prod closure via node-file-trace/npm-packlist, or
+  stage internal pkgs as `file:` deps + use the root lock). **Founder decision on packaging
+  approach.** The desktop app was never successfully staged once (no `staging/`, no output).
+- **(was #4) `/node-software` hosting — CONFIRMED BROKEN.** `RELEASE_BASE` default
+  `https://omnibazaar.com/node-software` does not work: `omnibazaar.com` → `192.249.121.28`
+  (NOT the validator host), and it **406s curl** / 301-redirects browsers — it serves none of
+  the staged files. The validator host (`65.108.205.116:3001/node-software`) serves them
+  (HTTP 200). **Needs infra:** a curl-friendly HTTPS host/subdomain for `/node-software`
+  (don't hardcode the validator IP+http into the bootstrap default).
+
+### Carried-forward open items
+3. **Packaged installers (.deb/AppImage/.exe/.dmg) not built/hosted.** Blocked on Blocker C
+   (workspace staging) + Win/macOS build hosts. Source-tarball curl-install is the only
+   working path. Win .exe buildable on V1 via Wine; macOS dmg needs a Mac runner (Apple
+   Developer $99/yr for notarization).
+5. **OmniUpdaterService + a source tarball:** updater expects a PRE-BUILT bundle for the
+   symlink swap; v1.0.0 is a SOURCE tarball (build-on-target). Auto-update is off-by-default,
+   so fine for now; reconcile when packaging lands.
+6. **`Coin/scripts/deploy-update-registry.js`** fix is on branch `feat/phase2-attestation`
+   (commit `82df603`, 2-file: script + `mainnet.json`), 116 commits ahead of `main` (main
+   fully contained). Not operationally blocking (registry already deployed); lands when the
+   branch merges, or cherry-pick if the deployer wants the corrected script on main sooner.
 
 ### Recommended next steps (in order)
-1. Founder: add `workflow` scope → push `e0ee0ca` (lands release.yml + --slim flag).
-2. Implement slim-on-first-run runtime-prep (item 2) — unblocks all packaged installers.
-3. Stand up the self-hosted GitHub Actions runner on V1 (label `self-hosted,linux,wine`),
-   `apt install wine64`; cut a `v1.0.1` tag to exercise release.yml.
-4. Confirm `omnibazaar.com/node-software` hosting (or repoint RELEASE_BASE).
-5. Optional: persist the new registry address to `memory/deployment-mainnet.md`.
+1. **ASK-class — founder:** stand up the self-hosted GitHub Actions runner on V1
+   (label `self-hosted,linux,wine`), `apt install wine64`; cut a `v1.0.1` tag to exercise
+   `release.yml`.
+2. **Founder decision:** desktop packaging approach (Blocker C) — workspace-aware staging.
+3. **Infra:** stand up a curl-friendly HTTPS host for `/node-software` (or set
+   `OBZ_RELEASE_BASE` in the published install one-liners).
+4. Persist the new registry address to `memory/deployment-mainnet.md`. **(done 2026-06-04.)**
 
 ### Open task-tracker items
 All session tasks (#27 redeploy registry, #28 sync address, #29 publish release,
