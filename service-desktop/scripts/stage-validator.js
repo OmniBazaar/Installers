@@ -31,7 +31,13 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const VALIDATOR_DIR = path.join(REPO_ROOT, "Validator");
 const WEBAPP_BUILD = path.join(REPO_ROOT, "WebApp", "build");
 const ROOT_NODE_MODULES = path.join(REPO_ROOT, "node_modules");
-const ESBUILD = path.join(ROOT_NODE_MODULES, ".bin", "esbuild");
+// Resolve esbuild from wherever Node finds it (service-desktop's own devDependency,
+// else the hoisted workspace copy) so staging never depends on a transitive hoist.
+const ESBUILD = path.join(
+  path.dirname(require.resolve("esbuild/package.json")),
+  "bin",
+  "esbuild",
+);
 const INSTALLERS_DIR = path.resolve(__dirname, "..", "..");
 const SHARED_DIST = path.join(INSTALLERS_DIR, "dist", "shared");
 const STAGING_ROOT = path.resolve(__dirname, "..", "staging");

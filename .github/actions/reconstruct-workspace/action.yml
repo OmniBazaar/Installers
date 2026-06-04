@@ -1,0 +1,48 @@
+name: Reconstruct build workspace
+description: >
+  Check out the sibling OmniBazaar repos the installer build needs (Validator,
+  WebApp, Packages), restore the CI-pinned root workspace manifest, run the npm
+  workspace install, and build Validator + WebApp. Assumes the Installers repo is
+  already checked out at ./Installers and Node is set up. Leaves the workspace at
+  the job root looking like a dev machine's ~/OmniBazaar tree.
+
+inputs:
+  token:
+    description: Token with read access to the OmniBazaar Validator/WebApp/Packages repos.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout Validator
+      uses: actions/checkout@v4
+      with:
+        repository: OmniBazaar/Validator
+        path: Validator
+        token: ${{ inputs.token }}
+    - name: Checkout WebApp
+      uses: actions/checkout@v4
+      with:
+        repository: OmniBazaar/WebApp
+        path: WebApp
+        token: ${{ inputs.token }}
+    - name: Checkout Packages
+      uses: actions/checkout@v4
+      with:
+        repository: OmniBazaar/Packages
+        path: packages
+        token: ${{ inputs.token }}
+    - name: Restore root workspace manifest
+      shell: bash
+      run: cp Installers/ci/workspace/package.json package.json
+    - name: Workspace install (hoist deps, link @omnibazaar/* + vendored tarballs)
+      shell: bash
+      run: npm install
+    - name: Build Validator (tsc -> dist)
+      shell: bash
+      working-directory: Validator
+      run: npm run build
+    - name: Build WebApp (vite -> build)
+      shell: bash
+      working-directory: WebApp
+      run: npm run build

@@ -16,7 +16,17 @@
 #   - macOS .dmg + notarization            → GitHub-hosted `macos-latest` (only fires
 #       on a release, keeping the 10x macOS minute multiplier spend minimal).
 #
-# STAGING: `stage-validator.js` resolves a production-only node_modules on the
+# WORKSPACE: OmniBazaar is a polyrepo (separate per-app repos + an ungoverned
+# local workspace manifest). Each job reconstructs the build workspace from the
+# sibling repos via the composite action `.github/actions/reconstruct-workspace`
+# (checks out Validator/WebApp/Packages, restores the CI-pinned root manifest at
+# `ci/workspace/package.json`, npm-installs the workspace, builds Validator +
+# WebApp). REQUIRES repo secret `OBZ_CHECKOUT_TOKEN` (a token with READ access to
+# those repos — a fine-grained read-only PAT is preferred; the default
+# GITHUB_TOKEN can't read other repos). Keep `ci/workspace/package.json` in sync
+# with the real root manifest.
+#
+# STAGING: `stage-validator.js` then resolves a production-only node_modules on the
 # build host (transpiling unpublished `@omnibazaar/*` workspace deps to JS and
 # carrying vendored tarballs along), so the shipped bundle is self-contained and
 # loads on any Node version — no on-user-machine install or native compile.
@@ -53,9 +63,15 @@ jobs:
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: Installers
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Reconstruct build workspace (Validator + WebApp + packages)
+        uses: ./Installers/.github/actions/reconstruct-workspace
+        with:
+          token: ${{ secrets.OBZ_CHECKOUT_TOKEN }}
       - name: Install desktop deps
         working-directory: Installers/service-desktop
         run: npm ci
@@ -76,9 +92,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: Installers
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Reconstruct build workspace (Validator + WebApp + packages)
+        uses: ./Installers/.github/actions/reconstruct-workspace
+        with:
+          token: ${{ secrets.OBZ_CHECKOUT_TOKEN }}
       - name: Install desktop deps
         working-directory: Installers/service-desktop
         run: npm ci
@@ -101,9 +123,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: Installers
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Reconstruct build workspace (Validator + WebApp + packages)
+        uses: ./Installers/.github/actions/reconstruct-workspace
+        with:
+          token: ${{ secrets.OBZ_CHECKOUT_TOKEN }}
       - name: Install desktop deps
         working-directory: Installers/service-desktop
         run: npm ci
@@ -131,9 +159,15 @@ jobs:
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: Installers
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Reconstruct build workspace (Validator + WebApp + packages)
+        uses: ./Installers/.github/actions/reconstruct-workspace
+        with:
+          token: ${{ secrets.OBZ_CHECKOUT_TOKEN }}
       - name: Build shared verifier (dist/shared)
         run: npm ci && npm run build
       - name: Checkout Validator + WebApp payloads
