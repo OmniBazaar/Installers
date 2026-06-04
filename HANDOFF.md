@@ -138,9 +138,37 @@ Release scripts are repointed to mainnet (chain 88008).
   scheduler loads.
 - **Cross-platform native + bundle size** for packaged installers (see Blocker C).
 
+### 2026-06-04 (latest) — native-OS build split, Electron bumped, polyrepo CI wired
+
+- **CSW B — native-OS build split** (`0f9b3bf`). `release.yml` now builds each OS on its own
+  runner: `desktop-linux` (self-hosted), `desktop-windows` (`windows-latest`), `desktop-macos`
+  (`macos-latest`). Fixes the cross-platform native problem (sharp ships per-platform via
+  optionalDependencies; cross-building bundled the wrong libs). **Wine is now moot** — the
+  Linux job no longer needs it (the runner still has it installed, harmless).
+- **Electron bumped 32 (EOL) → 42 + electron-builder 25 → 26** (`8f706a6`). 32 was past
+  end-of-life (no security patches). Verified: type-check + build + 50 tests + 0 vulns.
+- **CSW D — polyrepo workspace reconstruction in CI** (`66bcca2`). Each job reconstructs the
+  build workspace from the separate repos: committed root manifest at `ci/workspace/package.json`
+  + composite action `.github/actions/reconstruct-workspace` (checks out Validator/WebApp/Packages,
+  restores manifest, npm-installs workspace, builds Validator + WebApp). esbuild made an explicit
+  service-desktop dep. **Polyrepo retained — no monorepo.**
+
+### 🔑 FOUNDER ACTIONS PENDING (pipeline can't run until both done)
+1. **Set repo secret `OBZ_CHECKOUT_TOKEN`** (read access to Validator/WebApp/Packages) so CI can
+   check out the sibling repos: `gh secret set OBZ_CHECKOUT_TOKEN --repo OmniBazaar/Installers`
+   (a fine-grained read-only PAT is preferred over a broad classic PAT).
+2. **Stand up `get.omnibazaar.com`** (DNS A-record + Nginx + WebApp redeploy) — steps in
+   `get-omnibazaar-hosting.md`. Until then installs need an `OBZ_RELEASE_BASE` override.
+
+After both: set the macOS signing secrets (CSC_LINK etc.) and cut a `v1.0.1` tag to exercise the
+full pipeline — that's the first packaged smoke (still unverified end-to-end here).
+
 ### Still open
-- **Packaged installers** (.deb/AppImage/.exe/.dmg): runner is up; gated on Blocker-C
-  cross-platform native + Win/macOS specifics (macOS dmg needs a Mac runner + Apple Developer
-  $99/yr notarization).
+- **First packaged smoke** (.deb/AppImage/.exe/.dmg actually built + launched): unblocked once
+  `OBZ_CHECKOUT_TOKEN` is set + a tag is cut. macOS dmg needs Apple Developer $99/yr notarization.
+- **Node-version coupling (systemic):** ship `@omnibazaar/liquidity-config` as built JS to drop
+  the Node ≥22.18 runtime requirement entirely (CSW presented; LOW urgency — both paths work now).
+- **Bundle size** ~1.2 GB: defer a targeted prune until the first packaged smoke shows what the
+  service-node actually loads.
 - **OmniUpdaterService vs source tarball:** updater expects a pre-built bundle; v1.0.0 is a
   source tarball. Auto-update off-by-default, so fine for now.
