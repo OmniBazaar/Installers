@@ -1,6 +1,6 @@
 {
   "name": "@omnibazaar/service-desktop",
-  "version": "0.1.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Cross-platform desktop launcher for an OmniBazaar service node (onboarding, dependency provisioning, supervised service-node.js, tray UI).",
   "license": "UNLICENSED",

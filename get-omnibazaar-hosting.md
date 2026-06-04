@@ -12,10 +12,13 @@ staged files live on the validator host (`65.108.205.116:3001/node-software/…`
 HTTP 200, served by express.static).
 
 ## 1. DNS
-Add at the ISP:
+Add at the ISP — an **A record** pointing the subdomain at V1's public IPv4:
 ```
 get.omnibazaar.com.   A   65.108.205.116
 ```
+This is the exact pattern already in use: `ens-gateway.omnibazaar.com` resolves to
+V1 (`65.108.205.116`) and V1's nginx proxies it to the validator on `:3001`. The
+apex `omnibazaar.com` stays on the marketing host (`192.249.121.28`) — unaffected.
 
 ## 2. TLS (Let's Encrypt)
 ```
@@ -37,7 +40,7 @@ server {
     location = /service-node { return 302 /node-software/install-service-node.sh; }
 
     location /node-software/ {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://65.108.205.116:3001;   # validator binds its host IP, not loopback
         proxy_set_header Host $host;
     }
 }
