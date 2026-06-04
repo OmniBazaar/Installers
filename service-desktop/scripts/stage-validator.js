@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 /**
  * Stage the Validator runtime bundle into staging/validator/ for electron-builder
- * to ship as an unpacked extraResource. Copies the built `dist/`, the production
- * `node_modules`, and the `WebApp/build/` static assets the service node serves.
+ * to ship as an unpacked extraResource. Copies the built `dist/`, a production
+ * `node_modules` resolved on the build host, and the `WebApp/build/` static
+ * assets the service node serves.
  *
  * The staged directory is what the supervised `node dist/service-node.js` child
  * executes at runtime, and what the Phase-4 hot updater atomically swaps. Run via
  * `npm run stage:validator` (invoked by the dist:* scripts before packaging).
+ *
+ * Two monorepo-specific wrinkles are handled so a self-contained `npm install`
+ * succeeds outside the workspace:
+ *   - Vendored deps pinned to `file:vendor-tarballs/*.tgz` — the tarball dir is
+ *     copied alongside the manifest (paths resolve relative to it).
+ *   - Workspace-internal `@omnibazaar/*` deps — unpublished (so a registry
+ *     install 404s) AND shipped as TypeScript source (main → src/index.ts, which
+ *     only loads on a Node that strips types, 22.18+; Electron 32 bundles Node 20
+ *     and the Linux installer provisions Node 20, neither of which can). Each is
+ *     transpiled to CommonJS with esbuild and staged as a `file:` dependency.
  *
  * This script is plain Node (no TS build step) so it can run in the prepack hook.
  */
@@ -19,6 +30,8 @@ const { execFileSync } = require("child_process");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const VALIDATOR_DIR = path.join(REPO_ROOT, "Validator");
 const WEBAPP_BUILD = path.join(REPO_ROOT, "WebApp", "build");
+const ROOT_NODE_MODULES = path.join(REPO_ROOT, "node_modules");
+const ESBUILD = path.join(ROOT_NODE_MODULES, ".bin", "esbuild");
 const INSTALLERS_DIR = path.resolve(__dirname, "..", "..");
 const SHARED_DIST = path.join(INSTALLERS_DIR, "dist", "shared");
 const STAGING_ROOT = path.resolve(__dirname, "..", "staging");
@@ -43,25 +56,68 @@ function copyTree(src, dest) {
 }
 
 /**
- * Stage the Validator's package manifest, and (unless slim) a production-only
- * node_modules tree, without mutating the developer's working tree.
+ * Transpile each workspace-internal `@omnibazaar/*` runtime dependency to a
+ * self-contained CommonJS bundle under `staging/validator/vendor-internal/` and
+ * repoint the dependency to that path, so the build-host `npm install` resolves
+ * it without the public registry (it is unpublished) and the staged runtime
+ * loads it on any Node version (no TypeScript stripping required).
  *
- * In SLIM mode the manifest is staged but node_modules is NOT — the app installs
- * prod deps with `npm ci --omit=dev` into a writable runtime dir on first launch,
- * keeping the shipped installer tens of MB instead of GBs.
- *
- * @param {boolean} slim - When true, stage the manifest only (no install).
+ * @param {Record<string, string>} deps - Validator dependency map; mutated in
+ *   place so each internal dep points at its staged `file:` location.
  */
-function stageManifest(slim) {
-  const destPkg = path.join(STAGING, "package.json");
-  copyTree(path.join(VALIDATOR_DIR, "package.json"), destPkg);
-  const lock = path.join(VALIDATOR_DIR, "package-lock.json");
-  if (fs.existsSync(lock)) {
-    copyTree(lock, path.join(STAGING, "package-lock.json"));
+function stageInternalPackages(deps) {
+  for (const name of Object.keys(deps)) {
+    if (!name.startsWith("@omnibazaar/")) {
+      continue;
+    }
+    // Workspace packages are symlinked into the monorepo node_modules.
+    const linked = path.join(ROOT_NODE_MODULES, name);
+    const srcPkgPath = path.join(linked, "package.json");
+    if (!fs.existsSync(srcPkgPath)) {
+      throw new Error(
+        `Internal dep ${name} not resolvable at ${linked}. Run a workspace install first.`,
+      );
+    }
+    const srcPkg = JSON.parse(fs.readFileSync(srcPkgPath, "utf8"));
+    const entry = path.join(linked, srcPkg.main || "./src/index.ts");
+    const shortName = name.slice("@omnibazaar/".length);
+    const destDir = path.join(STAGING, "vendor-internal", shortName);
+    fs.mkdirSync(destDir, { recursive: true });
+    execFileSync(
+      ESBUILD,
+      [
+        entry,
+        "--bundle",
+        "--platform=node",
+        "--format=cjs",
+        `--outfile=${path.join(destDir, "index.js")}`,
+      ],
+      { stdio: "inherit" },
+    );
+    fs.writeFileSync(
+      path.join(destDir, "package.json"),
+      `${JSON.stringify({ name, version: srcPkg.version, main: "index.js" }, null, 2)}\n`,
+    );
+    deps[name] = `file:./vendor-internal/${shortName}`;
   }
-  if (slim) {
-    return;
-  }
+}
+
+/**
+ * Write the staged manifest (with internal deps repointed to their built
+ * `file:` bundles) and resolve a production-only `node_modules` on the build
+ * host. The developer's Validator/package.json is never mutated.
+ */
+function stageManifest() {
+  const srcPkg = JSON.parse(
+    fs.readFileSync(path.join(VALIDATOR_DIR, "package.json"), "utf8"),
+  );
+  const deps = srcPkg.dependencies || {};
+  stageInternalPackages(deps);
+  srcPkg.dependencies = deps;
+  fs.writeFileSync(
+    path.join(STAGING, "package.json"),
+    `${JSON.stringify(srcPkg, null, 2)}\n`,
+  );
   execFileSync(
     "npm",
     ["install", "--omit=dev", "--no-audit", "--no-fund", "--ignore-scripts"],
@@ -70,7 +126,6 @@ function stageManifest(slim) {
 }
 
 function main() {
-  const slim = process.argv.includes("--slim");
   fs.rmSync(STAGING_ROOT, { recursive: true, force: true });
   fs.mkdirSync(STAGING, { recursive: true });
 
@@ -79,24 +134,19 @@ function main() {
   // The dependency provisioner shells out to these at runtime (Yugabyte, etc.).
   copyTree(path.join(VALIDATOR_DIR, "scripts"), path.join(STAGING, "scripts"));
   copyTree(path.join(VALIDATOR_DIR, "systemd"), path.join(STAGING, "systemd"));
-  // The lockfile pins some deps to local `file:vendor-tarballs/*.tgz` paths
-  // (e.g. a patched libp2p-gossipsub). Those paths resolve relative to the
-  // staged package.json, so the tarballs must travel with it or `npm install`
-  // fails with ENOENT. Copy the directory verbatim when present.
+  // Vendored deps pin `file:vendor-tarballs/*.tgz` relative to the manifest, so
+  // the tarballs must travel with it or `npm install` fails with ENOENT.
   const vendorTarballs = path.join(VALIDATOR_DIR, "vendor-tarballs");
   if (fs.existsSync(vendorTarballs)) {
     copyTree(vendorTarballs, path.join(STAGING, "vendor-tarballs"));
   }
-  stageManifest(slim);
+  stageManifest();
 
-  // Stage the Phase-0 shared artifact CLI (update check). When not slim it
-  // resolves `ethers` via NODE_PATH into the Validator bundle's node_modules;
-  // in slim mode the first-run install populates it.
+  // Stage the Phase-0 shared artifact CLI (update check). It resolves `ethers`
+  // via NODE_PATH into the Validator bundle's node_modules at runtime.
   copyTree(SHARED_DIST, STAGING_SHARED);
 
-  process.stdout.write(
-    `Staged Validator${slim ? " (SLIM — no node_modules)" : ""} + shared bundles into ${STAGING_ROOT}\n`,
-  );
+  process.stdout.write(`Staged Validator + shared bundles into ${STAGING_ROOT}\n`);
 }
 
 main();

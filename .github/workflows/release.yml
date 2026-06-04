@@ -14,11 +14,10 @@
 #   - macOS .dmg + notarization            → GitHub-hosted `macos-latest` (only fires
 #       on a release, keeping the 10x macOS minute multiplier spend minimal).
 #
-# SLIM-ON-FIRST-RUN (always): the desktop bundle and the .deb ship the Validator
-# WITHOUT its multi-GB production node_modules. `stage-validator.js --slim` stages
-# dist + scripts + systemd + WebApp/build + package.json only; the app installs
-# prod deps with `npm ci --omit=dev` into a writable runtime dir on first launch
-# (see Installers/service-desktop runtime-prep). This keeps installers at tens of MB.
+# STAGING: `stage-validator.js` resolves a production-only node_modules on the
+# build host (transpiling unpublished `@omnibazaar/*` workspace deps to JS and
+# carrying vendored tarballs along), so the shipped bundle is self-contained and
+# loads on any Node version — no on-user-machine install or native compile.
 #
 # Publishing the on-chain release (hash → UpdateRegistry) stays a MANUAL, deployer-
 # signed step (Coin/scripts/sign-release.js + publish-release.js) — CI never holds
@@ -58,9 +57,9 @@ jobs:
       - name: Compile (main + renderer)
         working-directory: Installers/service-desktop
         run: npm run build
-      - name: Stage SLIM Validator (no node_modules)
+      - name: Stage Validator runtime
         working-directory: Installers/service-desktop
-        run: node scripts/stage-validator.js --slim
+        run: node scripts/stage-validator.js
       - name: electron-builder (AppImage + deb + NSIS via Wine)
         working-directory: Installers/service-desktop
         env:
@@ -83,9 +82,9 @@ jobs:
       - name: Compile (main + renderer)
         working-directory: Installers/service-desktop
         run: npm run build
-      - name: Stage SLIM Validator (no node_modules)
+      - name: Stage Validator runtime
         working-directory: Installers/service-desktop
-        run: node scripts/stage-validator.js --slim
+        run: node scripts/stage-validator.js
       - name: electron-builder (dmg + notarize)
         working-directory: Installers/service-desktop
         env:
@@ -110,20 +109,20 @@ jobs:
       - name: Build shared verifier (dist/shared)
         run: npm ci && npm run build
       - name: Checkout Validator + WebApp payloads
-        # The .deb postinst runs install-*.sh in SLIM mode (no bundled
-        # node_modules); the node installs prod deps on first start.
+        # The .deb postinst installs the staged Validator bundle (self-contained
+        # node_modules built on the runner by stage-validator.js).
         run: |
           echo "Payload assembly assumes the Validator + WebApp build artifacts are"
           echo "available to the runner (sibling checkouts or a prior build step)."
       - name: Build gateway .deb
         run: |
           bash gateway-linux/packaging/build-deb.sh \
-            --payload "$VALIDATOR_SLIM_PAYLOAD" --verifier dist \
+            --payload "$VALIDATOR_PAYLOAD" --verifier dist \
             --version "$OBZ_VERSION" --out ./out
       - name: Build service-node .deb
         run: |
           bash service-linux/packaging/build-deb.sh \
-            --payload "$VALIDATOR_SLIM_PAYLOAD" --verifier dist \
+            --payload "$VALIDATOR_PAYLOAD" --verifier dist \
             --version "$OBZ_VERSION" --out ./out
       - name: Build release tarballs + verifier bundle
         run: |
