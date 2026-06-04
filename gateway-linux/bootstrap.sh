@@ -19,7 +19,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 # ── Parameters (env-overridable) ─────────────────────────────────────────
 COMPONENT="validator"
 VERSION="${OBZ_VERSION:-latest}"                       # explicit semver or "latest"
-RELEASE_BASE="${OBZ_RELEASE_BASE:-https://omnibazaar.com/node-software}"
+RELEASE_BASE="${OBZ_RELEASE_BASE:-https://get.omnibazaar.com/node-software}"
 WORK_DIR="${OBZ_WORK_DIR:-/tmp/omnibazaar-gateway-install}"
 
 echo -e "${BLUE}=== OmniBazaar Gateway Validator bootstrap ===${NC}"
@@ -31,7 +31,7 @@ fi
 # ── Ensure prerequisites ─────────────────────────────────────────────────
 if ! command -v node >/dev/null 2>&1; then
   echo -e "${YELLOW}Installing Node.js 20.x…${NC}"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y -qq nodejs
 fi
 for tool in curl tar; do
