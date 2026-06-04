@@ -153,15 +153,26 @@ Release scripts are repointed to mainnet (chain 88008).
   restores manifest, npm-installs workspace, builds Validator + WebApp). esbuild made an explicit
   service-desktop dep. **Polyrepo retained — no monorepo.**
 
-### 🔑 FOUNDER ACTIONS PENDING (pipeline can't run until both done)
-1. **Set repo secret `OBZ_CHECKOUT_TOKEN`** (read access to Validator/WebApp/Packages) so CI can
-   check out the sibling repos: `gh secret set OBZ_CHECKOUT_TOKEN --repo OmniBazaar/Installers`
-   (a fine-grained read-only PAT is preferred over a broad classic PAT).
-2. **Stand up `get.omnibazaar.com`** (DNS A-record + Nginx + WebApp redeploy) — steps in
-   `get-omnibazaar-hosting.md`. Until then installs need an `OBZ_RELEASE_BASE` override.
+### 🔑 FOUNDER ACTIONS — both DONE 2026-06-04
+1. **`OBZ_CHECKOUT_TOKEN` — SET + VERIFIED.** Holds a Rick-Crites repo-scoped classic PAT;
+   the `ci-selftest.yml` workflow (manual `gh workflow run ci-selftest.yml`) checks out all 3
+   sibling repos green. NOTE: that PAT is broad (admin:org etc.); a fine-grained **read-only**
+   PAT scoped to the 3 repos would be tighter — worth rotating to, since the self-hosted runner
+   (V1, deployer-key host) can read repo secrets. `gh auth token` is broken in this env (returns
+   an error string) — set the secret from the `.git-credentials` PAT via `printf '%s' "$PAT" | gh secret set …`.
+2. **`get.omnibazaar.com` — LIVE.** Already served by the existing `*.omnibazaar.com` wildcard
+   nginx vhost → validator `:3001`, valid wildcard TLS. Verified: `/node-software/install-gateway.sh`
+   + `/node-software/v1.0.0/…tar.gz` both HTTP 200. No new vhost needed. (Optional: the short
+   `/gateway`,`/service-node` URLs in the script comments aren't wired — full `/node-software/…`
+   paths work; add redirects only if you want the short form.)
 
-After both: set the macOS signing secrets (CSC_LINK etc.) and cut a `v1.0.1` tag to exercise the
-full pipeline — that's the first packaged smoke (still unverified end-to-end here).
+**Versioning:** desktop app is now **0.9.1**; use **v0.9.x** tags while the pipeline is unproven.
+⚠️ The on-chain UpdateRegistry already has validator+service-node at **1.0.0** — do NOT publish an
+on-chain 0.9.x release (it's *older* than 1.0.0, so UpdateCheckService won't treat it as an update).
+Keep installer/desktop testing at 0.9.x; only re-publish on-chain when cutting a real release ≥1.0.1.
+
+Next: set macOS signing secrets (CSC_LINK etc.), then cut a `v0.9.1` tag to exercise the full
+pipeline — the first end-to-end packaged smoke (still unverified here).
 
 ### Still open
 - **First packaged smoke** (.deb/AppImage/.exe/.dmg actually built + launched): unblocked once
