@@ -107,29 +107,40 @@ Release scripts are repointed to mainnet (chain 88008).
   (HTTP 200). **Needs infra:** a curl-friendly HTTPS host/subdomain for `/node-software`
   (don't hardcode the validator IP+http into the bootstrap default).
 
-### Carried-forward open items
-3. **Packaged installers (.deb/AppImage/.exe/.dmg) not built/hosted.** Blocked on Blocker C
-   (workspace staging) + Win/macOS build hosts. Source-tarball curl-install is the only
-   working path. Win .exe buildable on V1 via Wine; macOS dmg needs a Mac runner (Apple
-   Developer $99/yr for notarization).
-5. **OmniUpdaterService + a source tarball:** updater expects a PRE-BUILT bundle for the
-   symlink swap; v1.0.0 is a SOURCE tarball (build-on-target). Auto-update is off-by-default,
-   so fine for now; reconcile when packaging lands.
-6. **`Coin/scripts/deploy-update-registry.js`** fix is on branch `feat/phase2-attestation`
-   (commit `82df603`, 2-file: script + `mainnet.json`), 116 commits ahead of `main` (main
-   fully contained). Not operationally blocking (registry already deployed); lands when the
-   branch merges, or cherry-pick if the deployer wants the corrected script on main sooner.
+### 2026-06-04 (later) — Blocker C fixed, runner up, registry merged, hosting wired
 
-### Recommended next steps (in order)
-1. **ASK-class — founder:** stand up the self-hosted GitHub Actions runner on V1
-   (label `self-hosted,linux,wine`), `apt install wine64`; cut a `v1.0.1` tag to exercise
-   `release.yml`.
-2. **Founder decision:** desktop packaging approach (Blocker C) — workspace-aware staging.
-3. **Infra:** stand up a curl-friendly HTTPS host for `/node-software` (or set
-   `OBZ_RELEASE_BASE` in the published install one-liners).
-4. Persist the new registry address to `memory/deployment-mainnet.md`. **(done 2026-06-04.)**
+- **Blocker C — FIXED + verified** (`c376e9e`). `stage-validator.js` now transpiles each
+  unpublished `@omnibazaar/*` workspace dep to CommonJS with esbuild and stages it as a
+  `file:` dep (also fixes a Node-version crash: those packages ship as TS source, which only
+  loads on Node ≥22.18; Electron 32 bundles Node 20). Verified on Linux: full `npm install`
+  resolves 1400 pkgs with no 404/ENOENT; staged liquidity-config loads as plain CJS; bcrypt
+  prebuilds + sharp platform pkgs present despite `--ignore-scripts` (66 `.node`). `--slim`
+  dropped from `release.yml`. **Still needs the runner smoke** (packaged electron-builder run)
+  and **cross-platform native handling** (Windows-via-Wine on the Linux runner would bundle
+  Linux binaries — Win/macOS need per-target staging). Bundle is ~1.2 GB.
+- **Self-hosted runner — UP** (`v1-selfhosted`, online, labels `self-hosted,Linux,X64,wine`,
+  systemd `active`+`enabled`; Wine 6.0.3 installed). Matches `release.yml` `runs-on`.
+  **Do NOT cut a release tag until** Blocker-C cross-platform native is sorted — `--win` on
+  Wine still ships Linux binaries.
+- **`get.omnibazaar.com` hosting — wired, pending DNS** (`94ed9ab` + WebApp `e5d2717`,
+  unpushed). Bootstraps + WebApp `/download` now default to `https://get.omnibazaar.com/node-software`
+  and provision **Node 22**. Founder action in the morning: DNS A-record + Nginx vhost +
+  WebApp redeploy — exact steps in `Installers/get-omnibazaar-hosting.md`.
+- **Coin registry fix — DONE.** `feat/phase2-attestation` (116 commits, all completed/deployed
+  work) fast-forward-merged to `main` (`7cb73d7..82df603`); the `deploy-update-registry.js` +
+  `mainnet.json` fix rode along. main was a straggler since 2026-05-17.
 
-### Open task-tracker items
-All session tasks (#27 redeploy registry, #28 sync address, #29 publish release,
-#30 stage /node-software, #31 Win/macOS coming-soon + writeup) are **completed**. The
-items above are the carried-forward follow-ups, not tracker tasks.
+### Adjacent issues surfaced (not yet actioned)
+- **Node-version coupling (systemic).** The Validator requires Node ≥22.18 at runtime because
+  `@omnibazaar/liquidity-config` ships as TS source. Installers now provision Node 22, but the
+  robust fix is to **ship that package as built JS** (or have the Validator build bundle it),
+  which also helps WebApp. Until then, any consumer on Node <22.18 crashes when the liquidity
+  scheduler loads.
+- **Cross-platform native + bundle size** for packaged installers (see Blocker C).
+
+### Still open
+- **Packaged installers** (.deb/AppImage/.exe/.dmg): runner is up; gated on Blocker-C
+  cross-platform native + Win/macOS specifics (macOS dmg needs a Mac runner + Apple Developer
+  $99/yr notarization).
+- **OmniUpdaterService vs source tarball:** updater expects a pre-built bundle; v1.0.0 is a
+  source tarball. Auto-update off-by-default, so fine for now.
