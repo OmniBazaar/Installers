@@ -7,10 +7,12 @@
 #                                omnibazaar-service-node_<v>_amd64.deb
 #   - Release tarballs + verifier bundle (the on-chain-verified install payload)
 #
-# Build hosts (per your decision):
-#   - Linux AppImage/.deb + Windows .exe  → SELF-HOSTED runner on your Hetzner box
-#       (label: [self-hosted, linux, wine]). Windows .exe is built on Linux via Wine,
-#       so the self-hosted runner needs Wine installed once — see "Runner setup" below.
+# Build hosts — each OS builds on its OWN native runner so the staged
+# node_modules carry the right native binaries (sharp ships per-platform via
+# optionalDependencies; cross-building would bundle the wrong platform's libs):
+#   - Linux AppImage/.deb + headless .debs → SELF-HOSTED runner (label
+#       [self-hosted, linux]) on your Hetzner box. No Wine needed anymore.
+#   - Windows .exe (NSIS)                  → GitHub-hosted `windows-latest`.
 #   - macOS .dmg + notarization            → GitHub-hosted `macos-latest` (only fires
 #       on a release, keeping the 10x macOS minute multiplier spend minimal).
 #
@@ -43,14 +45,17 @@ env:
   OBZ_VERSION: ${{ github.event.inputs.version || github.ref_name }}
 
 jobs:
-  # ── Desktop app: Linux + Windows on the self-hosted Wine runner ──────────────
-  desktop-linux-win:
-    runs-on: [self-hosted, linux, wine]
+  # ── Desktop app: Linux on the self-hosted runner ─────────────────────────────
+  # Each OS builds on its own native runner so the staged node_modules carry the
+  # right native binaries (sharp ships per-platform via optionalDependencies;
+  # building --win on Linux/Wine would bundle Linux binaries — broken on Windows).
+  desktop-linux:
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install desktop deps
         working-directory: Installers/service-desktop
         run: npm ci
@@ -60,13 +65,36 @@ jobs:
       - name: Stage Validator runtime
         working-directory: Installers/service-desktop
         run: node scripts/stage-validator.js
-      - name: electron-builder (AppImage + deb + NSIS via Wine)
+      - name: electron-builder (AppImage + deb)
+        working-directory: Installers/service-desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux --publish always
+
+  # ── Desktop app: Windows on a GitHub-hosted Windows runner ───────────────────
+  desktop-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install desktop deps
+        working-directory: Installers/service-desktop
+        run: npm ci
+      - name: Compile (main + renderer)
+        working-directory: Installers/service-desktop
+        run: npm run build
+      - name: Stage Validator runtime
+        working-directory: Installers/service-desktop
+        run: node scripts/stage-validator.js
+      - name: electron-builder (NSIS)
         working-directory: Installers/service-desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Windows .exe is unsigned for now (SmartScreen "unknown publisher" — the
         # deferred Authenticode cert). Add CSC_LINK/CSC_KEY_PASSWORD here later.
-        run: npx electron-builder --linux --win --publish always
+        run: npx electron-builder --win --publish always
 
   # ── Desktop app: macOS on a GitHub-hosted runner (signed + notarized) ────────
   desktop-macos:
@@ -75,7 +103,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install desktop deps
         working-directory: Installers/service-desktop
         run: npm ci
@@ -100,12 +128,12 @@ jobs:
 
   # ── Headless Linux packages + release tarballs + verifier ────────────────────
   server-packages:
-    runs-on: [self-hosted, linux, wine]
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Build shared verifier (dist/shared)
         run: npm ci && npm run build
       - name: Checkout Validator + WebApp payloads
