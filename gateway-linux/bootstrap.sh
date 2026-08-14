@@ -28,6 +28,39 @@ if [[ $EUID -ne 0 ]]; then
   echo -e "${RED}Error: run as root (sudo).${NC}"; exit 1
 fi
 
+# ── Node Operator Terms acceptance gate ──────────────────────────────────
+# The documented install path is piped + non-interactive (curl | sudo bash),
+# so consent is collected via an explicit env var rather than a TTY prompt.
+NODE_TERMS_URL="${OBZ_NODE_TERMS_URL:-https://app.omnibazaar.com/node-terms}"
+case "${OBZ_ACCEPT_NODE_TERMS:-}" in
+  1|y|yes|true|Y|YES|TRUE) ;;
+  *)
+    echo -e "${YELLOW}"
+    echo "You must accept the OmniBazaar Node Operator Terms and Conditions"
+    echo "before installing a node."
+    echo
+    echo "  Read them here: ${NODE_TERMS_URL}"
+    echo
+    echo "Operating a node carries technical, financial, and regulatory risk,"
+    echo "including the risk of slashing and the loss of staked XOM and rewards."
+    echo "You are an independent operator, not an agent of OMNI, and you are"
+    echo "solely responsible for legal and regulatory compliance in your"
+    echo "jurisdiction."
+    echo
+    echo "To accept and proceed, re-run with OBZ_ACCEPT_NODE_TERMS=1, e.g.:"
+    echo "  curl -fsSL https://get.omnibazaar.com/gateway | sudo OBZ_ACCEPT_NODE_TERMS=1 bash"
+    echo -e "${NC}"
+    exit 1
+    ;;
+esac
+echo -e "${GREEN}Node Operator Terms accepted (OBZ_ACCEPT_NODE_TERMS).${NC}"
+# Record an auditable acceptance marker on the host.
+ACCEPT_DIR="${OBZ_STATE_DIR:-/etc/omnibazaar}"
+mkdir -p "$ACCEPT_DIR" 2>/dev/null && \
+  printf 'accepted_at=%s\ncomponent=%s\nversion=%s\nterms_url=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$COMPONENT" "$VERSION" "$NODE_TERMS_URL" \
+    > "$ACCEPT_DIR/node-terms-accepted.txt" 2>/dev/null || true
+
 # ── Ensure prerequisites ─────────────────────────────────────────────────
 if ! command -v node >/dev/null 2>&1; then
   echo -e "${YELLOW}Installing Node.js 20.x…${NC}"
@@ -49,7 +82,7 @@ if [[ "$VERSION" == "latest" ]]; then
   VERSION="$(node -e "
     const { ethers } = require('ethers');
     const RPC='${OMNICOIN_RPC_URL:-https://rpc.omnicoin.net}';
-    const REG='${OMNICOIN_UPDATE_REGISTRY:-0x65263253647a7e9700Df642a92b6074781DCAC81}';
+    const REG='${OMNICOIN_UPDATE_REGISTRY:-0x0e5Be74C661cEC8F4e72b72a63636ed24d60556C}';
     const abi=['function getLatestVersion(string) view returns (string)'];
     (async()=>{const p=new ethers.JsonRpcProvider(RPC);const c=new ethers.Contract(REG,abi,p);
       process.stdout.write(await c.getLatestVersion('${COMPONENT}'));})().catch(()=>process.stdout.write(''));

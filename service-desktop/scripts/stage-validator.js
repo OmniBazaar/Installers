@@ -40,25 +40,43 @@ const ESBUILD = path.join(
 );
 const INSTALLERS_DIR = path.resolve(__dirname, "..", "..");
 const SHARED_DIST = path.join(INSTALLERS_DIR, "dist", "shared");
-const STAGING_ROOT = path.resolve(__dirname, "..", "staging");
+// `--out <dir>` overrides the staging root so the release pipeline can stage
+// into its own output directory (the desktop packaging keeps the default).
+const OUT_ARG = process.argv.indexOf("--out");
+const STAGING_ROOT =
+  OUT_ARG !== -1 && process.argv[OUT_ARG + 1]
+    ? path.resolve(process.argv[OUT_ARG + 1])
+    : path.resolve(__dirname, "..", "staging");
 const STAGING = path.join(STAGING_ROOT, "validator");
 const STAGING_SHARED = path.join(STAGING_ROOT, "shared");
 
 /**
  * Copy a directory tree using the platform's fast native copy, falling back to
  * fs.cpSync. Throws if the source does not exist (a missing prerequisite must
- * fail the build loudly rather than ship an empty bundle).
+ * fail the build loudly rather than ship an empty bundle). `exclude` skips
+ * top-level entries (e.g. the /download artifact dirs a node never serves).
  * @param {string} src Absolute source directory.
  * @param {string} dest Absolute destination directory.
+ * @param {string[]} [exclude] Top-level names to skip.
  */
-function copyTree(src, dest) {
+function copyTree(src, dest, exclude = []) {
   if (!fs.existsSync(src)) {
     throw new Error(
       `Required source not found: ${src}. Build the Validator (npm run build) and WebApp first.`,
     );
   }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.cpSync(src, dest, { recursive: true, dereference: true });
+  const excludeSet = new Set(exclude);
+  fs.cpSync(src, dest, {
+    recursive: true,
+    dereference: true,
+    filter: (s) => {
+      const rel = path.relative(src, s);
+      if (rel === "") return true;
+      const top = rel.split(path.sep)[0];
+      return !excludeSet.has(top);
+    },
+  });
 }
 
 /**
@@ -136,10 +154,25 @@ function main() {
   fs.mkdirSync(STAGING, { recursive: true });
 
   copyTree(path.join(VALIDATOR_DIR, "dist"), path.join(STAGING, "dist"));
-  copyTree(WEBAPP_BUILD, path.join(STAGING, "WebApp", "build"));
+  // A node serves the SPA shell + its local listings, NOT the /download page's
+  // app-store artifacts — exclude `mobile/` (APKs) and `wallet/` (extension
+  // zips) and `node-software/` (bootstrap tarballs), which are gateway-served
+  // and together are ~6 GB of historical build output.
+  copyTree(WEBAPP_BUILD, path.join(STAGING, "WebApp", "build"), [
+    "mobile",
+    "wallet",
+    "node-software",
+  ]);
   // The dependency provisioner shells out to these at runtime (Yugabyte, etc.).
   copyTree(path.join(VALIDATOR_DIR, "scripts"), path.join(STAGING, "scripts"));
   copyTree(path.join(VALIDATOR_DIR, "systemd"), path.join(STAGING, "systemd"));
+  // DB migrations + seed config the local node applies on first boot
+  // (install-yugabyte.sh's run_migrations, apify-sources.json).
+  copyTree(path.join(VALIDATOR_DIR, "migrations"), path.join(STAGING, "migrations"));
+  const configDir = path.join(VALIDATOR_DIR, "config");
+  if (fs.existsSync(configDir)) {
+    copyTree(configDir, path.join(STAGING, "config"));
+  }
   // Vendored deps pin `file:vendor-tarballs/*.tgz` relative to the manifest, so
   // the tarballs must travel with it or `npm install` fails with ENOENT.
   const vendorTarballs = path.join(VALIDATOR_DIR, "vendor-tarballs");
