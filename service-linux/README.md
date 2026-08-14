@@ -1,11 +1,30 @@
 # Service Node — Linux package
 
-Headless server install for an OmniCoin L1 **service node**. Service nodes run
-the TypeScript business-logic services (DEX, marketplace, storage, KYC) only —
-**no avalanchego, no AVAX, no consensus**. They are the laptop-/server-class tier
-anyone can run; the only barrier is participation ≥ 25, enforced by the node at
-runtime. (Desktop operators should use the cross-platform app in
-`../service-desktop`; this package is for server-class operators.)
+Headless server install for an OmniCoin L1 **service node** (also called the
+"listing node" — one role, two names). A service node hosts **LOCAL P2P listings
+and local storage only**: it does **not** serve the aggregated verticals — RWA,
+Yield, Predictions, NFT and DEX — those are served by the gateway validators and
+are canonical on `app.omnibazaar.com`. It runs **no avalanchego, no AVAX, no
+consensus**, and needs **no stake or KYC**; the only barrier is participation
+≥ 25, enforced by the node at runtime. Operators earn marketplace fee + referral
+revenue — **no block rewards** (removed for service nodes, founder 2026-07-30).
+(Desktop operators should use the cross-platform app in `../service-desktop`;
+this package is for server-class operators.)
+
+## What it serves (and does not)
+
+- **Serves:** your LOCAL P2P marketplace listings + local storage. Listings a
+  seller chooses this node as "home" for are canonical here
+  (`https://<username>.omnibazaar.com/listing/<id>`).
+- **Does not serve:** the aggregated verticals — RWA, Yield, Predictions, NFT,
+  DEX. Those are gateway-validator surfaces, canonical only on
+  `app.omnibazaar.com`; a node host that renders them does so with
+  `X-Robots-Tag: noindex` + `canonical → app`.
+- **Writes nothing to the shared database.** A node relays seller-signed
+  listings UP to the gateway REST API (the gateway re-verifies the EIP-712
+  signature and is the sole DB writer) and pulls its home listings DOWN via
+  `GET /api/v1/node/listings/delta` into its own local-DB replica for serving
+  and offline use. No shared-DB credentials are provisioned.
 
 ## Install paths
 
@@ -35,7 +54,7 @@ with `OBZ_NONINTERACTIVE=1 OBZ_SKIP_BUILD=1` (the package ships a pre-built
 
 - installs Node 20 + the service-node code (or uses the pre-built `dist/` from
   the package);
-- derives the operator wallet **locally on first start** from the staking
+- derives the operator wallet **locally on first start** from the account
   credentials (`STAKING_USERNAME`/`STAKING_PASSWORD` → `KeyDerivationService`);
   the private key is never written to disk or transmitted;
 - generates a **mainnet-correct, qualification-enforcing** systemd unit
@@ -45,6 +64,9 @@ with `OBZ_NONINTERACTIVE=1 OBZ_SKIP_BUILD=1` (the package ships a pre-built
 
 The node refuses to serve until its participation score reaches 25 — that gate
 lives in `AuthenticationService.SERVICE_THRESHOLDS`, not in the installer.
+During Pioneer, a founder / test address can be exempted by adding it to
+`PIONEER_FOUNDER_ALLOWLIST` (comma-separated, lowercased) in the node's runtime
+environment file — see `packaging/service.env.example`.
 
 ## Installer env knobs (set by the package/bootstrap; overridable)
 

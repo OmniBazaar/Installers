@@ -7,7 +7,10 @@ products:
   YugabyteDB cluster + stake + KYC-3). Packaged as `.deb`/`.rpm` + a
   `curl | bash` bootstrap that wraps `install-gateway-validator.sh`.
   → [`gateway-linux/`](gateway-linux/README.md)
-- **Service Node** — laptop-class, anyone-runs. Two surfaces:
+- **Service Node** (also the "listing node" — one role, two names) — laptop-
+  class, anyone-runs, LOCAL P2P listings + local storage only (the RWA / Yield /
+  Predictions / NFT / DEX verticals are gateway-validator surfaces, canonical on
+  `app.omnibazaar.com`). Two surfaces:
   - a cross-platform **Electron desktop app** (tray UI, onboarding, bundled
     deps; silent WSL2 + YugabyteDB on Windows) → [`service-desktop/`](service-desktop/README.md)
   - a **headless Linux package** wrapping `install-service-node.sh`
