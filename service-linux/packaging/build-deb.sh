@@ -56,10 +56,11 @@ Architecture: $ARCH
 Depends: curl, ca-certificates, nodejs (>= 20)
 Maintainer: OmniBazaar <ops@omnibazaar.com>
 Description: OmniBazaar Service Node
- Headless service node for the OmniCoin L1 network. Runs the TypeScript
- business-logic services (DEX, marketplace, storage, KYC) with a
- qualification-enforcing systemd unit. No avalanchego or AVAX required.
- Operator config is read from /etc/omnibazaar/service.env.
+  Headless service node for the OmniCoin L1 network. Serves LOCAL P2P
+  marketplace listings and local storage only (RWA, Yield, Predictions, NFT and
+  DEX are gateway-validator surfaces). Provisions a single-node YugabyteDB and
+  installs a qualification-enforcing systemd unit. No avalanchego, AVAX, stake,
+  or KYC required. Operator config is read from /etc/omnibazaar/service.env.
 EOF
 
 install -m 0755 "$HERE/postinst" "$ROOT/DEBIAN/postinst"
