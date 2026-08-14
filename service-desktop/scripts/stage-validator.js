@@ -149,6 +149,47 @@ function stageManifest() {
   );
 }
 
+/**
+ * Remove known server-unneeded packages from the staged production node_modules.
+ *
+ * These are React Native / mobile bindings and dev-time tooling that reach the
+ * tree only via transitive deps the node never loads at runtime (verified: no
+ * `import` / `loadModule` of them anywhere in `src/`). Keeps the release tarball
+ * small. The node's own P2P only dynamically loads `@libp2p/peer-id`, which this
+ * list deliberately leaves in place.
+ *
+ * @type {string[]} Package paths relative to `node_modules/` (scope dirs removed
+ * whole when no other member is needed).
+ */
+const PRUNE_PACKAGES = [
+  "@react-native",
+  "@shopify/flash-list",
+  "@gql.tada",
+  "@0no-co",
+  "react-native",
+  "react-native-webrtc",
+  "hermes-compiler",
+  "recyclerlistview",
+  "typescript",
+];
+
+/**
+ * Delete the {@link PRUNE_PACKAGES} from the staged node_modules.
+ * @returns {void}
+ */
+function pruneNodeModules() {
+  const nm = path.join(STAGING, "node_modules");
+  let pruned = 0;
+  for (const name of PRUNE_PACKAGES) {
+    const target = path.join(nm, name);
+    if (fs.existsSync(target)) {
+      fs.rmSync(target, { recursive: true, force: true });
+      pruned += 1;
+    }
+  }
+  process.stdout.write(`Pruned ${pruned} server-unneeded packages from node_modules\n`);
+}
+
 function main() {
   fs.rmSync(STAGING_ROOT, { recursive: true, force: true });
   fs.mkdirSync(STAGING, { recursive: true });
@@ -180,6 +221,7 @@ function main() {
     copyTree(vendorTarballs, path.join(STAGING, "vendor-tarballs"));
   }
   stageManifest();
+  pruneNodeModules();
 
   // Stage the Phase-0 shared artifact CLI as a SELF-CONTAINED bundle. The
   // bootstrap runs `node verifier/shared/cli.js verify …` BEFORE the payload is
