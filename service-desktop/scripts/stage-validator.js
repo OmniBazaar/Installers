@@ -181,9 +181,24 @@ function main() {
   }
   stageManifest();
 
-  // Stage the Phase-0 shared artifact CLI (update check). It resolves `ethers`
-  // via NODE_PATH into the Validator bundle's node_modules at runtime.
-  copyTree(SHARED_DIST, STAGING_SHARED);
+  // Stage the Phase-0 shared artifact CLI as a SELF-CONTAINED bundle. The
+  // bootstrap runs `node verifier/shared/cli.js verify …` BEFORE the payload is
+  // extracted, so `ethers` (and any transitive dep) must be inlined — the old
+  // NODE_PATH-into-Validator-bundle trick only works for the desktop app,
+  // which has the bundle on disk. Bundling inlines ethers so the verifier runs
+  // standalone on a stranger's machine with only a stock Node.
+  fs.mkdirSync(STAGING_SHARED, { recursive: true });
+  execFileSync(
+    ESBUILD,
+    [
+      path.join(SHARED_DIST, "cli.js"),
+      "--bundle",
+      "--platform=node",
+      "--format=cjs",
+      `--outfile=${path.join(STAGING_SHARED, "cli.js")}`,
+    ],
+    { stdio: "inherit" },
+  );
 
   process.stdout.write(`Staged Validator + shared bundles into ${STAGING_ROOT}\n`);
 }
