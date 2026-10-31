@@ -24,7 +24,13 @@ supervises the node process, and surfaces status from the system tray.
    - **Linux / macOS:** runs the existing `install-yugabyte.sh`.
    - **Windows:** enables WSL2 (one administrator prompt) and provisions
      YugabyteDB *inside* the distro — no Docker. Fails loudly if hardware
-     virtualization is disabled in BIOS/UEFI.
+     virtualization is disabled in BIOS/UEFI. Before installing anything it
+     verifies the host: the `Ubuntu` distribution exists, it is running as **WSL
+     version 2** (upgrading it if not), systemd is enabled in `/etc/wsl.conf` and
+     actually became PID 1, a `.wslconfig` memory cap is written when the
+     operator has none, and lingering is enabled for the database's user-level
+     unit. Without those four checks the node installs cleanly and then never
+     starts again after a reboot.
 3. **Supervised node** — spawns `node dist/service-node.js` with the correct
    environment (`NODE_TYPE=service`, port 3001, `SERVICE_MIN_*` thresholds),
    polls `/health`, and restarts with exponential backoff on a crash.
