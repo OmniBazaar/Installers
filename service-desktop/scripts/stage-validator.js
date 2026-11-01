@@ -210,6 +210,14 @@ function main() {
   // DB migrations + seed config the local node applies on first boot
   // (install-yugabyte.sh's run_migrations, apify-sources.json).
   copyTree(path.join(VALIDATOR_DIR, "migrations"), path.join(STAGING, "migrations"));
+  // The operator-facing documents travel with the software: the listing-node
+  // entry point tells an operator to read `docs/INSTALL-LISTING-NODE.md` when its
+  // local schema is missing, and an installed machine has no repository to look it
+  // up in. Config follows for the same reason.
+  const docsDir = path.join(VALIDATOR_DIR, "docs");
+  if (fs.existsSync(docsDir)) {
+    copyTree(docsDir, path.join(STAGING, "docs"));
+  }
   const configDir = path.join(VALIDATOR_DIR, "config");
   if (fs.existsSync(configDir)) {
     copyTree(configDir, path.join(STAGING, "config"));
