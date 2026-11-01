@@ -37,7 +37,9 @@ Unicode true
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniBazaarListingNode"
 
 Name "${APPNAME}"
-OutFile "omnibazaar-listing-node-${VERSION}-win-x64-setup.exe"
+; Build output, not source: `dist/` is gitignored, so a 52 MB installer can
+; never look like a source change again.
+OutFile "dist\omnibazaar-listing-node-${VERSION}-win-x64-setup.exe"
 ; Per-user install: never Program Files, never HKLM, never elevation.
 InstallDir "$LOCALAPPDATA\OmniBazaar\ListingNode"
 RequestExecutionLevel user

@@ -44,10 +44,11 @@ PG_WINDOWS_ZIP=postgresql-16.4-1-windows-x64-binaries.zip \
 Or, with both already extracted: `--node-runtime <dir> --pg-dir <dir>`. Then:
 
 ```
-makensis -DVERSION=1.0.11 omnibazaar-listing-node.nsi
+mkdir -p dist && makensis -DVERSION=1.0.11 omnibazaar-listing-node.nsi
 ```
 
-Yields `omnibazaar-listing-node-1.0.11-win-x64-setup.exe` (52 MB, 2025-11-01). The
+Yields `dist/omnibazaar-listing-node-1.0.11-win-x64-setup.exe` (52 MB, 2025-11-01).
+`dist/` and `out/` are gitignored: a build output must never look like a source change. The
 nine-digit per-file manifest is inside the bundle as `bundle-manifest.json`.
 
 The bundle is refused unless every required part is present. Three of them were
