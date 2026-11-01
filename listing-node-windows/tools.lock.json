@@ -1,0 +1,17 @@
+{
+  "$comment": "The two third-party inputs to a Windows bundle, pinned. This file is the answer to 'why not commit the installer': the RECIPE is tracked, the artifacts are not. A rebuild is reproducible because both inputs have a URL and a SHA-256, and the version of each is a decision recorded here rather than in somebody's shell history.",
+  "node": {
+    "version": "20.18.0",
+    "url": "https://nodejs.org/dist/v20.18.0/node-v20.18.0-win-x64.zip",
+    "sha256": "f5cea43414cc33024bbe5867f208d1c9c915d6a38e92abeee07ed9e563662297",
+    "bytes": 29602979,
+    "why": "The runtime the node executes under on Windows. Node 20 LTS matches the minimum the installer enforces (Node.js 20+)."
+  },
+  "postgresql": {
+    "version": "16.4-1",
+    "url": "https://get.enterprisedb.com/postgresql/postgresql-16.4-1-windows-x64-binaries.zip",
+    "sha256": "3508d8f085bc3980f38211a82e3f31e5fcae9952105d3dc2f8be67b64a822baa",
+    "bytes": 338727828,
+    "why": "PostgreSQL 16 for Windows: the same major version the engine matrix proves the node's schema on. Only bin/, lib/ and share/ are staged; the archive's pgAdmin and documentation are dropped."
+  }
+}

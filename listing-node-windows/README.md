@@ -51,6 +51,11 @@ Yields `dist/omnibazaar-listing-node-1.0.11-win-x64-setup.exe` (52 MB, 2025-11-0
 `dist/` and `out/` are gitignored: a build output must never look like a source change. The
 nine-digit per-file manifest is inside the bundle as `bundle-manifest.json`.
 
+`tools.lock.json` pins the two third-party inputs (Node and PostgreSQL for Windows)
+by URL and SHA-256, so a rebuild is reproducible and a changed upstream artifact is
+visible rather than assumed. That file is the tracked "recipe"; the zips and the
+resulting installer are not tracked anywhere.
+
 The bundle is refused unless every required part is present. Three of them were
 learned by running it, not by reading it:
 
