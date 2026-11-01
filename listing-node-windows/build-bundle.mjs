@@ -46,12 +46,12 @@ import { join, relative } from "node:path";
 
 /** Files and directories every bundle must contain, checked after staging. */
 const REQUIRED = [
-  "node.exe",
-  "dist/listing-node.js",
-  "dist/cli/listingNodeManage.js",
-  "config/listing-node-surface.json",
-  "migrations/listing-node/001_listings.sql",
-  "migrations/listing-node/002_node_state.sql",
+  "app/node.exe",
+  "app/dist/listing-node.js",
+  "app/dist/cli/listingNodeManage.js",
+  "app/config/listing-node-surface.json",
+  "app/migrations/listing-node/001_listings.sql",
+  "app/migrations/listing-node/002_node_state.sql",
   "pgsql/bin/initdb.exe",
   "pgsql/bin/pg_ctl.exe",
   "pgsql/lib",
@@ -176,12 +176,14 @@ function stageValidator(validator, into) {
   if (!existsSync(join(validator, "dist", "listing-node.js"))) {
     throw new Error(`${validator}/dist/listing-node.js is missing — run "npm run build" in Validator first`);
   }
-  cpSync(join(validator, "dist"), join(into, "dist"), { recursive: true });
-  cpSync(join(validator, "config"), join(into, "config"), { recursive: true });
-  cpSync(join(validator, "migrations"), join(into, "migrations"), { recursive: true });
+  const app = join(into, "app");
+  mkdirSync(app, { recursive: true });
+  cpSync(join(validator, "dist"), join(app, "dist"), { recursive: true });
+  cpSync(join(validator, "config"), join(app, "config"), { recursive: true });
+  cpSync(join(validator, "migrations"), join(app, "migrations"), { recursive: true });
 
   writeFileSync(
-    join(into, "package.json"),
+    join(app, "package.json"),
     `${JSON.stringify(
       {
         name: "omnibazaar-listing-node",
@@ -215,13 +217,14 @@ function readVersion(validator) {
  * @param into - Bundle directory.
  */
 function installProductionDeps(into) {
+  const app = join(into, "app");
   writeFileSync(
-    join(into, "package.json"),
+    join(app, "package.json"),
     `${JSON.stringify(
       {
         name: "omnibazaar-listing-node",
         private: true,
-        version: "0.0.0",
+        version: JSON.parse(readFileSync(join(app, "package.json"), "utf8")).version,
         dependencies: { ethers: "^6.13.0", express: "^4.19.2", pg: "^8.11.5", winston: "^3.11.0" },
       },
       null,
@@ -230,7 +233,7 @@ function installProductionDeps(into) {
     "utf8",
   );
   execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund"], {
-    cwd: into,
+    cwd: app,
     stdio: "inherit",
   });
 }
@@ -243,11 +246,13 @@ function writeWrapper(into) {
   const content = [
     "@echo off",
     "rem OmniBazaar listing node — runs the manager with the bundled Node runtime.",
-    "rem %~dp0 is the directory of this script, so the bundle can live anywhere.",
+    "rem %~dp0 is this program's directory, so the bundle can live anywhere.",
     `"%~dp0node.exe" "%~dp0dist\\cli\\listingNodeManage.js" %*`,
     "if errorlevel 1 pause",
     "",
   ].join("\r\n");
+  writeFileSync(join(into, "app", "obz-listing-node.cmd"), content, "utf8");
+  // At the bundle root as well, for the installer to place beside the program.
   writeFileSync(join(into, "obz-listing-node.cmd"), content, "utf8");
 }
 
@@ -324,17 +329,20 @@ function main() {
 
   // node.exe is copied next to the program, and the whole Node distribution's DLLs
   // with it: a lone node.exe fails on Windows with a missing-library dialog.
+  mkdirSync(join(out, "app"), { recursive: true });
   for (const name of readdirSync(nodeRuntime)) {
-    cpSync(join(nodeRuntime, name), join(out, name), { recursive: true });
+    cpSync(join(nodeRuntime, name), join(out, "app", name), { recursive: true });
   }
-  // The runtime's node_modules (npm) is not needed by the node; drop it to keep the
-  // installer small and to make the bundle's dependency surface auditable.
-  rmSync(join(out, "node_modules", "npm"), { recursive: true, force: true });
+  // The runtime's bundled npm is not needed by the node; dropping it keeps the
+  // installer small and the bundle's dependency surface auditable.
+  rmSync(join(out, "app", "node_modules", "npm"), { recursive: true, force: true });
 
   stageValidator(options.validator, out);
   installProductionDeps(out);
   writeWrapper(out);
 
+  // PostgreSQL sits beside the program, at the path the manager expects for
+  // `--root <install dir>`: `<root>\\pgsql\\bin`.
   cpSync(join(pgDir, "bin"), join(out, "pgsql", "bin"), { recursive: true });
   cpSync(join(pgDir, "lib"), join(out, "pgsql", "lib"), { recursive: true });
   cpSync(join(pgDir, "share"), join(out, "pgsql", "share"), { recursive: true });

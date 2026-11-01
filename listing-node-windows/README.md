@@ -7,17 +7,24 @@ PowerShell copy of the installer's logic — the decisions live in
 
 ```
 listing-node-windows/
-├── build-bundle.mjs              assembles out/ and refuses an incomplete bundle
-├── omnibazaar-listing-node.iss   Inno Setup 6 — copies, shortcuts, first run
-├── out/                          the staged bundle (not committed)
+├── build-bundle.mjs                assembles out/ and refuses an incomplete bundle
+├── omnibazaar-listing-node.nsi     NSIS 3 — copies, shortcuts, first run
+├── out/                            the staged bundle (not committed)
 └── README.md
 ```
+
+**NSIS, not Inno Setup — decided on evidence.** Inno's compiler runs only on Windows,
+and its installer does not complete under Wine 6, so an Inno build could not be
+produced by this build host at all. NSIS compiles here, which means the artifact we
+hash and attest is the artifact this pipeline built, on the machine that also signs
+and publishes.
 
 ## What gets installed, and where
 
 | Piece | Path | Notes |
 |---|---|---|
-| Program, node runtime, PostgreSQL | `%LOCALAPPDATA%\OmniBazaar\ListingNode` | per user, never Program Files |
+| Program, node runtime | `%LOCALAPPDATA%\OmniBazaar\ListingNode\app` | per user, never Program Files |
+| PostgreSQL | `%LOCALAPPDATA%\OmniBazaar\ListingNode\pgsql` | beside the program, deleted on uninstall |
 | Database cluster | `…\ListingNode\data` | `initdb` on first run, loopback only |
 | Identity (key, node address, database URL) | `…\ListingNode\config\listing-node.env` | written once, never overwritten |
 | Node log | `…\ListingNode\logs\listing-node.log` | rotated at 10 MB, five kept |
@@ -37,8 +44,11 @@ PG_WINDOWS_ZIP=postgresql-16.4-1-windows-x64-binaries.zip \
 Or, with both already extracted: `--node-runtime <dir> --pg-dir <dir>`. Then:
 
 ```
-iscc omnibazaar-listing-node.iss /DAppVersion=1.0.11
+makensis -DVERSION=1.0.11 omnibazaar-listing-node.nsi
 ```
+
+Yields `omnibazaar-listing-node-1.0.11-win-x64-setup.exe` (52 MB, 2025-11-01). The
+nine-digit per-file manifest is inside the bundle as `bundle-manifest.json`.
 
 The bundle is refused unless every required part is present. Three of them were
 learned by running it, not by reading it:

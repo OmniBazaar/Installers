@@ -37,3 +37,8 @@ release-artifacts/
 # ── OS / editor noise ────────────────────────────────────────────────────
 .DS_Store
 *.log
+
+# Staged Windows bundle and the installer it produces (built, not committed).
+listing-node-windows/out/
+listing-node-windows/*.exe
+*.sha256

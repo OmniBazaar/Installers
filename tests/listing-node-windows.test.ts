@@ -24,50 +24,70 @@ function read(name: string): string {
   return readFileSync(join(ROOT, name), "utf8");
 }
 
-describe("the Inno Setup installer", () => {
-  const iss = read("omnibazaar-listing-node.iss");
+describe("the NSIS installer", () => {
+  const iss = read("omnibazaar-listing-node.nsi");
 
   it("installs for one user and never asks for elevation", () => {
-    expect(iss).toContain("PrivilegesRequired=lowest");
-    expect(iss).toContain("PrivilegesRequiredOverridesAllowed=");
-    expect(iss).not.toContain("PrivilegesRequired=admin");
-    expect(iss).toContain("DefaultDirName={localappdata}\\OmniBazaar\\ListingNode");
+    expect(iss).toContain("RequestExecutionLevel user");
+    expect(iss).not.toContain("RequestExecutionLevel admin");
+    expect(iss).toContain('InstallDir "$LOCALAPPDATA\\OmniBazaar\\ListingNode"');
+    // Per-user context for Start Menu / Startup / registry.
+    expect(iss).toContain("SetShellVarContext current");
   });
 
   it("writes nothing machine-wide", () => {
-    // HKLM, {commonappdata}, {commonprograms} and the Program Files roots are the
-    // machine-wide locations; any of them would need elevation to write.
-    for (const forbidden of ["{commonappdata}", "{commonprograms}", "HKLM", "HKEY_LOCAL_MACHINE"]) {
+    // Directives, not prose: the header comment mentions these words to explain why
+    // they are not used, and a test that greps prose would fail on its own rationale.
+    for (const forbidden of [
+      "WriteRegStr HKLM",
+      "WriteRegDWORD HKLM",
+      "$PROGRAMFILES",
+      "$COMMONAPPDATA",
+      "$COMMONPROGRAMS",
+    ]) {
       expect(iss).not.toContain(forbidden);
     }
-    expect(iss).toContain("{userprograms}");
+    // The uninstall entry is per user, which is what makes it removable by the
+    // account that installed it.
+    expect(iss).toContain("WriteRegStr HKCU");
+    expect(iss).toContain("$SMPROGRAMS");
   });
 
   it("asks about deleting the data, and the default answer keeps it", () => {
     expect(iss).toContain("MB_DEFBUTTON2");
-    expect(iss).toContain("IDYES then");
+    expect(iss).toContain("IDNO keepData");
     // Silent uninstall cannot ask, so it must not delete.
-    expect(iss).toContain("if not UninstallSilent then");
-    // The deletion only happens when the operator said yes.
-    expect(iss).toContain("if (CurUninstallStep = usPostUninstall) and PurgeData then");
+    expect(iss).toContain("IfSilent keepData");
+    // The deletion sits between the MessageBox and the label the NO answer jumps to,
+    // so reaching it requires an explicit YES. (The label is after the block because
+    // that is where the jump lands — reading it the other way round is the mistake
+    // this assertion exists to prevent.)
+    const jumpOnNo = iss.indexOf("IDNO keepData");
+    const labelAt = iss.indexOf("keepData:");
+    const deleteAt = iss.indexOf('RMDir /r "$INSTDIR\\data"');
+    expect(jumpOnNo).toBeGreaterThan(-1);
+    expect(deleteAt).toBeGreaterThan(jumpOnNo);
+    expect(deleteAt).toBeLessThan(labelAt);
   });
 
   it("starts the node at logon from the user's own startup folder", () => {
     // Supervision without a service: a service needs an administrator and runs as an
     // account that does not own the database files.
-    expect(iss).toContain("{userstartup}");
-    expect(iss).toMatch(/Parameters: "start"/);
-    expect(iss).not.toContain("[Registry]");
+    expect(iss).toContain("$SMSTARTUP");
+    expect(iss).toContain("CreateShortCut");
   });
 
   it("stops the node before removing files", () => {
-    expect(iss).toContain("[UninstallRun]");
-    expect(iss).toMatch(/Parameters: "stop"/);
+    const uninstall = iss.slice(iss.indexOf('Section "Uninstall"'));
+    const stopAt = uninstall.indexOf("stop --root");
+    const firstDeleteAt = uninstall.indexOf("RMDir /r");
+    expect(stopAt).toBeGreaterThan(-1);
+    expect(firstDeleteAt).toBeGreaterThan(stopAt);
   });
 
   it("runs the same manager the Linux installer drives", () => {
-    expect(iss).toMatch(/Parameters: "install"/);
-    expect(iss).toContain("obz-listing-node.cmd");
+    expect(iss).toContain('"$INSTDIR\\app\\${APPEXE}" install --root "$INSTDIR"');
+    expect(iss).toContain('"$INSTDIR\\app\\${APPEXE}" start --root "$INSTDIR"');
   });
 });
 
