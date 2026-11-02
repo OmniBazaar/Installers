@@ -55,7 +55,7 @@ VIAddVersionKey "FileVersion" "${VERSION}"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_TITLE "The node is installed and running"
+!define MUI_FINISHPAGE_TITLE "The node is installed"
 !define MUI_FINISHPAGE_TEXT "Your node's address and next steps are in $INSTDIR\config\listing-node.env.$\r$\n$\r$\nRegistering the node on chain is a separate command: it needs a funded key, and this installer will not spend your gas."
 !insertmacro MUI_PAGE_FINISH
 
@@ -120,9 +120,20 @@ Section "Install"
   DetailPrint "Starting the node ..."
   nsExec::ExecToLog '"$INSTDIR\app\${APPEXE}" start --root "$INSTDIR"'
   Pop $0
-  StrCmp $0 "0" afterStart
+  StrCmp $0 "0" nodeUp nodeDown
+
+  nodeDown:
   MessageBox MB_ICONEXCLAMATION|MB_OK \
-    "The node installed but did not start.$\r$\n$\r$\nUse the Start Menu entry, or open $INSTDIR\logs\install.log for the reason."
+    "The node installed but did not start.$\r$\n$\r$\nThe reason is in $INSTDIR\logs\install.log, and the node's own log is $INSTDIR\logs\listing-node.log. Use the Start Menu entry to try again."
+  Goto afterStart
+
+  nodeUp:
+  ; 🛑 The complaint that ended the last test: "installer reported success but gave
+  ; no way or offer to open the Dashboard. It just closed." So: open it. The node is
+  ; healthy at this point (the manager waits for /health before returning 0), and the
+  ; dashboard command refuses politely if it is not.
+  DetailPrint "Opening the dashboard ..."
+  Exec '"$INSTDIR\app\${APPEXE}" dashboard --root "$INSTDIR"'
 
   afterStart:
 
