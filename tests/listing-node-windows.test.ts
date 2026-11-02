@@ -77,6 +77,31 @@ describe("the NSIS installer", () => {
     expect(iss).toContain("CreateShortCut");
   });
 
+  it("captures the install output instead of a console window that closes", () => {
+    // The first Windows install showed "could not start server" in a window that
+    // vanished; nothing was left to read. ExecToLog streams into the installer's
+    // detail pane, and the manager keeps its own log file.
+    expect(iss).toContain("nsExec::ExecToLog");
+    expect(iss).not.toMatch(/ExecWait '\"\$INSTDIR\\app\\\$\{APPEXE\}\" install/);
+    expect(iss).toContain("logs\\install.log");
+  });
+
+  it("checks the install exit code and does not start a node that failed to install", () => {
+    const install = iss.indexOf('install --root');
+    const pop = iss.indexOf('Pop $0', install);
+    const failBranch = iss.indexOf('The node could not finish installing');
+    const start = iss.indexOf(' start --root');
+    expect(pop).toBeGreaterThan(install);
+    expect(failBranch).toBeGreaterThan(pop);
+    // `start` is only reached through the success label.
+    expect(start).toBeGreaterThan(failBranch);
+    expect(iss).toContain('StrCmp $0 "0" installOk');
+  });
+
+  it("offers one diagnostic screen an operator can paste", () => {
+    expect(iss).toContain('doctor --root');
+  });
+
   it("stops the node before removing files", () => {
     const uninstall = iss.slice(iss.indexOf('Section "Uninstall"'));
     const stopAt = uninstall.indexOf("stop --root");

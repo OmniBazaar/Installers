@@ -75,14 +75,32 @@ Section "Install"
   File /r "out\pgsql\*"
   SetOutPath "$INSTDIR"
 
-  ; First run: create the cluster, apply the schema, write the identity. The manager
-  ; prints its own progress, and the installer waits because the node must not start
-  ; before its database exists.
+  ; First run: create the cluster, apply the schema, write the identity.
+  ;
+  ; `nsExec::ExecToLog` and not `ExecWait`: ExecWait on a .cmd opens a console window
+  ; that closes with its output, which is how the first Windows install ended with
+  ; "could not start server" and nothing to read. This streams the manager's output
+  ; into the installer's own detail pane AND leaves the manager's log file. The exit
+  ; code is CHECKED: a failed install must not be followed by "start", whose "no
+  ; identity" message is what hid the real error last time.
   DetailPrint "Creating the node's database and identity (this takes a minute) ..."
-  ExecWait '"$INSTDIR\app\${APPEXE}" install --root "$INSTDIR"'
+  nsExec::ExecToLog '"$INSTDIR\app\${APPEXE}" install --root "$INSTDIR"'
+  Pop $0
+  StrCmp $0 "0" installOk
 
+  MessageBox MB_ICONSTOP|MB_OK \
+    "The node could not finish installing.$\r$\n$\r$\nThe details are in:$\r$\n$INSTDIR\logs\install.log$\r$\n$\r$\nSend that file, plus the folder listing of $INSTDIR. Nothing was sent on chain and no key was created."
+  Goto afterStart
+
+  installOk:
   DetailPrint "Starting the node ..."
-  ExecWait '"$INSTDIR\app\${APPEXE}" start --root "$INSTDIR"'
+  nsExec::ExecToLog '"$INSTDIR\app\${APPEXE}" start --root "$INSTDIR"'
+  Pop $0
+  StrCmp $0 "0" afterStart
+  MessageBox MB_ICONEXCLAMATION|MB_OK \
+    "The node installed but did not start.$\r$\n$\r$\nUse the Start Menu entry, or open $INSTDIR\logs\install.log for the reason."
+
+  afterStart:
 
   ; Start Menu (current user only).
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
@@ -90,6 +108,9 @@ Section "Install"
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Stop the node.lnk" "$INSTDIR\app\${APPEXE}" 'stop --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Status.lnk" "$INSTDIR\app\${APPEXE}" 'status --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\View the log.lnk" "$INSTDIR\app\${APPEXE}" 'logs --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
+  ; One screen an operator can paste into a message when something is wrong: paths,
+  ; writability, whether the database and the identity exist, and what is on the ports.
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\Diagnose.lnk" "$INSTDIR\app\${APPEXE}" 'doctor --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
 
   ; Comes back after a reboot without a service and without elevation: an entry in
   ; the user's own Startup folder. A Windows service would need an administrator and
@@ -122,6 +143,7 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${APPNAME}\Stop the node.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Status.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\View the log.lnk"
+  Delete "$SMPROGRAMS\${APPNAME}\Diagnose.lnk"
   RMDir "$SMPROGRAMS\${APPNAME}"
   Delete "$SMSTARTUP\OmniBazaar Listing Node.lnk"
 
