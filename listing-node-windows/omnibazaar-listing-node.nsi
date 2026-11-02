@@ -74,11 +74,29 @@ Section "Install"
   ; answers it without asking the operator to hunt through AppData.
   DetailPrint "Installing to: $INSTDIR"
 
+  ; A breadcrumb outside the install, so "where did it go" is answerable even if the
+  ; install directory is later removed or never visible to the account being checked.
+  FileOpen $9 "$TEMP\omnibazaar-install-path.txt" w
+  FileWrite $9 "$INSTDIR"
+  FileClose $9
+  DetailPrint "Path recorded in: $TEMP\omnibazaar-install-path.txt"
+
   SetOutPath "$INSTDIR\app"
   File /r "out\app\*"
   SetOutPath "$INSTDIR\pgsql"
   File /r "out\pgsql\*"
   SetOutPath "$INSTDIR"
+
+  ; 🛑 Prove the copy happened before claiming anything about a database. A report of
+  ; "no folder exists" after a successful-looking install cannot be reproduced here,
+  ; and the honest response is to make the installer check its own work instead of
+  ; trusting that it worked.
+  IfFileExists "$INSTDIR\app\node.exe" copyOk
+    MessageBox MB_ICONSTOP|MB_OK \
+      "The installer could not write its files to:$\r$\n$INSTDIR$\r$\n$\r$\nThis usually means antivirus or Controlled Folder Access blocked it. Add an exclusion for $LOCALAPPDATA\OmniBazaar and run the installer again."
+    Abort
+  copyOk:
+  DetailPrint "Files copied to $INSTDIR ($INSTDIR\app\node.exe present)"
 
   ; First run: create the cluster, apply the schema, write the identity.
   ;
