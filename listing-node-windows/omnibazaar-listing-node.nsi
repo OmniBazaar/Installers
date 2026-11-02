@@ -69,6 +69,11 @@ Section "Install"
   ; Program files are split from the node's data on purpose: `app\` and `pgsql\` are
   ; the software (uninstall deletes them), while `data\`, `config\` and `logs\` are
   ; created at first run and are never touched by an uninstall.
+  ; State the destination in the window before copying anything: the first Windows
+  ; report could not say which directory the installer chose, and this one line
+  ; answers it without asking the operator to hunt through AppData.
+  DetailPrint "Installing to: $INSTDIR"
+
   SetOutPath "$INSTDIR\app"
   File /r "out\app\*"
   SetOutPath "$INSTDIR\pgsql"
@@ -83,6 +88,7 @@ Section "Install"
   ; into the installer's own detail pane AND leaves the manager's log file. The exit
   ; code is CHECKED: a failed install must not be followed by "start", whose "no
   ; identity" message is what hid the real error last time.
+  DetailPrint "Log file: $INSTDIR\logs\install.log"
   DetailPrint "Creating the node's database and identity (this takes a minute) ..."
   nsExec::ExecToLog '"$INSTDIR\app\${APPEXE}" install --root "$INSTDIR"'
   Pop $0
