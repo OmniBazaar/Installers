@@ -146,11 +146,11 @@ Section "Install"
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Open dashboard.lnk" "$INSTDIR\app\${APPEXE}" 'dashboard --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Start the node.lnk" "$INSTDIR\app\${APPEXE}" 'start --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Stop the node.lnk" "$INSTDIR\app\${APPEXE}" 'stop --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
-  CreateShortCut "$SMPROGRAMS\${APPNAME}\Status.lnk" "$INSTDIR\app\${APPEXE}" 'status --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
-  CreateShortCut "$SMPROGRAMS\${APPNAME}\View the log.lnk" "$INSTDIR\app\${APPEXE}" 'logs --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\Status.lnk" "$SYSDIR\cmd.exe" '/k ""$INSTDIR\app\${APPEXE}" status --root "$INSTDIR"' "$SYSDIR\cmd.exe" 0
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\View the log.lnk" "$SYSDIR\cmd.exe" '/k ""$INSTDIR\app\${APPEXE}" logs --root "$INSTDIR"' "$SYSDIR\cmd.exe" 0
   ; One screen an operator can paste into a message when something is wrong: paths,
   ; writability, whether the database and the identity exist, and what is on the ports.
-  CreateShortCut "$SMPROGRAMS\${APPNAME}\Diagnose.lnk" "$INSTDIR\app\${APPEXE}" 'doctor --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\Diagnose.lnk" "$SYSDIR\cmd.exe" '/k ""$INSTDIR\app\${APPEXE}" doctor --root "$INSTDIR"' "$SYSDIR\cmd.exe" 0
 
   ; Comes back after a reboot without a service and without elevation: an entry in
   ; the user's own Startup folder. A Windows service would need an administrator and
