@@ -128,6 +128,11 @@ Section "Install"
 
   ; Start Menu (current user only).
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
+  ; The console is the answer to "it installed and then said nothing": one page that
+  ; shows the identity, how many listings the replica holds, the sync cursor, the
+  ; configuration and the log, and links to the application for anything to do with
+  ; the account.
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\Open dashboard.lnk" "$INSTDIR\app\${APPEXE}" 'dashboard --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Start the node.lnk" "$INSTDIR\app\${APPEXE}" 'start --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Stop the node.lnk" "$INSTDIR\app\${APPEXE}" 'stop --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Status.lnk" "$INSTDIR\app\${APPEXE}" 'status --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
@@ -163,6 +168,7 @@ Section "Uninstall"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
 
+  Delete "$SMPROGRAMS\${APPNAME}\Open dashboard.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Start the node.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Stop the node.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Status.lnk"
