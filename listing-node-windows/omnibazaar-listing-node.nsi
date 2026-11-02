@@ -146,6 +146,9 @@ Section "Install"
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Open dashboard.lnk" "$INSTDIR\app\${APPEXE}" 'dashboard --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Start the node.lnk" "$INSTDIR\app\${APPEXE}" 'start --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Stop the node.lnk" "$INSTDIR\app\${APPEXE}" 'stop --root "$INSTDIR"' "$INSTDIR\app\node.exe" 0
+  ; Registration is the operator's decision and one command; a shortcut keeps it out of
+  ; the CLI-only world without putting an on-chain transaction inside the installer.
+  CreateShortCut "$SMPROGRAMS\${APPNAME}\Register this node.lnk" "$SYSDIR\cmd.exe" '/k ""$INSTDIR\app\${APPEXE}" register --root "$INSTDIR"' "$SYSDIR\cmd.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\Status.lnk" "$SYSDIR\cmd.exe" '/k ""$INSTDIR\app\${APPEXE}" status --root "$INSTDIR"' "$SYSDIR\cmd.exe" 0
   CreateShortCut "$SMPROGRAMS\${APPNAME}\View the log.lnk" "$SYSDIR\cmd.exe" '/k ""$INSTDIR\app\${APPEXE}" logs --root "$INSTDIR"' "$SYSDIR\cmd.exe" 0
   ; One screen an operator can paste into a message when something is wrong: paths,
@@ -182,6 +185,7 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${APPNAME}\Open dashboard.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Start the node.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Stop the node.lnk"
+  Delete "$SMPROGRAMS\${APPNAME}\Register this node.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Status.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\View the log.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Diagnose.lnk"
