@@ -84,6 +84,23 @@ uninstall → program removed, data/ and config/ kept
 reinstall → identity kept (same node address), schema re-applied, /health 200
 ```
 
+## When an install "did nothing"
+
+Symptom seen in the first Windows test: the installer completes, the manager reports
+a database that will not start, and afterwards neither the install folder nor a log
+exists. Before reading anything else, three checks on the SAME machine that ran the
+installer:
+
+```
+type "%TEMP%\omnibazaar-install-path.txt"      where the installer actually wrote
+dir "%LOCALAPPDATA%\OmniBazaar\ListingNode"    what landed there
+dir C:\OmniBazaar                             in case $LOCALAPPDATA expanded empty
+```
+
+The installer now writes that first file before copying anything, and aborts with a
+message if `app\node.exe` is missing afterwards — antivirus and Controlled Folder
+Access are the usual reasons a copy silently does not land.
+
 ## What still needs a Windows virtual machine
 
 These cannot be proven anywhere else, and P4's exit criteria name them:
