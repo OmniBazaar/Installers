@@ -31,6 +31,11 @@ Unicode true
 !ifndef VERSION
   !define VERSION "0.0.0"
 !endif
+; Output directory, defaulted so a hand-run `makensis` still works. The release step
+; passes -DOUTDIR so the installer lands beside the artifacts it is hashed with.
+!ifndef OUTDIR
+  !define OUTDIR "dist"
+!endif
 
 !define APPNAME "OmniBazaar Listing Node"
 !define APPEXE "obz-listing-node.cmd"
@@ -39,7 +44,7 @@ Unicode true
 Name "${APPNAME}"
 ; Build output, not source: `dist/` is gitignored, so a 52 MB installer can
 ; never look like a source change again.
-OutFile "dist\omnibazaar-listing-node-${VERSION}-win-x64-setup.exe"
+OutFile "${OUTDIR}\omnibazaar-listing-node-${VERSION}-win-x64-setup.exe"
 ; Per-user install: never Program Files, never HKLM, never elevation.
 InstallDir "$LOCALAPPDATA\OmniBazaar\ListingNode"
 RequestExecutionLevel user
