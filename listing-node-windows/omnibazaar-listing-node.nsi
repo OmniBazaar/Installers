@@ -56,7 +56,7 @@ VIAddVersionKey "FileVersion" "${VERSION}"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "The node is installed"
-!define MUI_FINISHPAGE_TEXT "Your node's address and next steps are in $INSTDIR\config\listing-node.env.$\r$\n$\r$\nRegistering the node on chain is a separate command: it needs a funded key, and this installer will not spend your gas."
+!define MUI_FINISHPAGE_TEXT "Your node's identity is in $INSTDIR\config\listing-node.env.$\r$\n$\r$\nThe node starts with Windows. Open your dashboard at http://127.0.0.1:3200/ to check it, change settings, and register this node. Registering costs you nothing: the network pays a new node's gas."
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM

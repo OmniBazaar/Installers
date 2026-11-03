@@ -33,6 +33,29 @@ and publishes.
 Two accounts on one machine therefore get two independent nodes, which is the
 behaviour a database inside a user profile implies.
 
+## What the operator gets, and what they can change
+
+The Start Menu folder opens the operator console at **http://127.0.0.1:3200/**. It
+answers on loopback only and refuses any request whose `Host` header names something
+else, so a web page the operator visits cannot read it. It shows the node's address,
+how many listings the replica holds, when it last synced, the jobs that are running and
+the log, and it carries the four settings an operator may change — gateway, port,
+discovery scope and region — with the exact sentence to follow to make a change take
+effect. Every other key in `listing-node.env` is refused: the node's key, its address
+and its database address are identity, not preferences.
+
+The terminal equivalent is the same code:
+
+```
+obz-listing-node config                          # show the four settings
+obz-listing-node config --set NODE_PORT=3210     # validate, write, say what to do
+obz-listing-node restart                         # what makes a saved setting real
+```
+
+A saved setting is **not** a live one — the running node read its file at boot, and the
+console shows "saved — needs a restart" until it is restarted. That state is invisible
+from anywhere else, which is why it is stated twice: on the row and above the table.
+
 ## Building a bundle
 
 ```
