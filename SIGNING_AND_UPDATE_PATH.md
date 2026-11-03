@@ -13,7 +13,7 @@ now (`scripts 7595ed1`), so signing and publishing are the only missing steps.
 
 ---
 
-## 1. SignPath Foundation — findings
+## 1. SignPath Foundation — findings 
 
 ### What it is
 
@@ -61,6 +61,16 @@ gaps and one subjective one:
 3. The Windows build is not a verifiable CI build from public source.
 4. Their reputation clause is discretionary: an executable product nobody has downloaded
    is exactly the case they say they are cautious about.
+
+### Prepared on 2026-11-03 (what exists now)
+
+| Gap | State |
+|---|---|
+| Code signing policy page | **Written**: [`CODE_SIGNING_POLICY.md`](CODE_SIGNING_POLICY.md) — their exact sentence, roles, privacy line, build process, reporting route. Still to be linked from the website download page and the repo READMEs. |
+| Verifiable CI build | **Written**: [`.github/workflows/listing-node-windows.yml`](.github/workflows/listing-node-windows.yml) — builds from public source on `windows-latest`, downloads Node and PostgreSQL by the pinned SHA-256 in `tools.lock.json`, verifies both, produces the installer + hash, and has the SignPath submit step ready but inert until the secrets exist. |
+| Product-version metadata | **Fixed**: `VIProductVersion` now comes from `-DVERSION` (it was hard-coded `1.0.11` while shipping as 1.0.25), `ProductVersion` and `LegalCopyright` added. A signer's artifact policy requires these to be set and equal in every build. |
+| Release exists | Open — needs the publish step. |
+| MFA + roles | Roles are written in the policy; MFA to be confirmed on both accounts. |
 
 ### What it would take, in order
 
@@ -330,12 +340,16 @@ than a function call.
 
 ### Phases
 
-| Phase | Work | Depends on |
+| Phase | Work | State |
 |---|---|---|
-| P1 | `latestVersion` endpoint + console banner + `/health` fields + `status` line | none |
-| P2 | `obz-listing-node update` with verify + swap + rollback (Linux/macOS) | P1 |
-| P3 | Console "Install now" button through the detached updater (Windows included) | P2 |
-| P4 | Gateway-validator upgrade script: download → verify against registry → stop → swap → start → probe a real API route (`/api/v1/node-storefronts`), one host at a time | P2 |
+| P1 | Version + latest from the registry, console card, `/health` fields, `status` line | **done** (`Validator 676e8a72`). Verified live: running 1.0.11, latest 1.0.11, `/health` reports `version`/`latestVersion`/`updateAvailable`. |
+| P2 | `obz-listing-node update`: verify the registry's SHA-256, swap, migrate, start, roll back on failure (Linux/macOS) | **done** (`Validator 676e8a72`). Refuses a revoked release, refuses when the registry knows no hash, never reports "up to date" after a failed check. |
+| P3 | Console "Install the update" button through a detached updater; Windows gets the installer instead | **done for the page and the API**; Windows returns 409 with the installer URL by design. |
+| P4 | Gateway-validator upgrade script: download → verify against registry → stop → swap → start → probe a real API route (`/api/v1/node-storefronts`), one host at a time | not started |
+
+Decided 2026-11-03: **notify-only with a one-click button** — no silent auto-install, as
+documented above. macOS ships as **`.zip`**, so notarization is a later addition to the same
+artifact rather than a change of shape.
 
 ### Two decisions inside this
 

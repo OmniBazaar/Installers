@@ -1,0 +1,152 @@
+# Build the Windows listing-node installer from public source, and sign it.
+#
+# Why this workflow exists: a signature is only worth something if the binary it covers
+# can be traced to a reviewable build. Building the installer on a developer's machine and
+# signing it afterwards proves nothing about the source — and the code-signing certificate
+# we use depends on exactly that (see ../CODE_SIGNING_POLICY.md).
+#
+# Two properties to keep:
+#
+# 1. **Inputs are pinned by URL *and* SHA-256** (listing-node-windows/tools.lock.json).
+#    Node.js and the PostgreSQL Windows binaries are downloaded here, verified, and the
+#    build refuses to continue if either changed. A "silently different upstream artifact"
+#    is the one supply-chain failure a checksum can catch.
+# 2. **Signing is a separate, approved step**, not part of the build. It runs only when the
+#    SignPath secrets are configured, it signs the file this run just produced, and the
+#    SHA-256 is recomputed afterwards — a signature changes the bytes, so a hash recorded
+#    before signing describes a file nobody downloads.
+#
+# Until SignPath is configured, this workflow still does its job: it produces an unsigned
+# installer and its hash, so the release can be reproduced and compared.
+
+name: Listing node — Windows installer
+
+on:
+  push:
+    tags:
+      - "listing-node-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Base version, e.g. 1.0.12 (no leading v)"
+        required: true
+      sign:
+        description: "Submit to SignPath when the secrets are configured"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Installers
+        uses: actions/checkout@v4
+        with:
+          path: Installers
+
+      # The Validator is a workspace member: it cannot `npm install` on its own. This
+      # composite action is the same one the release pipeline uses, so a build here and a
+      # build there produce the same `dist/`.
+      - name: Reconstruct the build workspace (Validator + WebApp + packages)
+        uses: ./Installers/.github/actions/reconstruct-workspace
+        with:
+          token: ${{ secrets.OBZ_CHECKOUT_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ── The two third-party inputs, verified against the pinned recipe ──────────────
+      - name: Download and verify the pinned Windows inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/win-inputs"
+          node -e '
+            const fs = require("fs");
+            const lock = JSON.parse(fs.readFileSync("Installers/listing-node-windows/tools.lock.json", "utf8"));
+            console.log(lock.node.url);
+            console.log(lock.node.sha256);
+            console.log(lock.postgresql.url);
+            console.log(lock.postgresql.sha256);
+          ' > "$RUNNER_TEMP/pins.txt"
+          mapfile -t PINS < "$RUNNER_TEMP/pins.txt"
+          curl -fsSL -o "$RUNNER_TEMP/win-inputs/node.zip"        "${PINS[0]}"
+          curl -fsSL -o "$RUNNER_TEMP/win-inputs/postgresql.zip"  "${PINS[2]}"
+          echo "${PINS[1]}  $RUNNER_TEMP/win-inputs/node.zip"        | sha256sum -c -
+          echo "${PINS[3]}  $RUNNER_TEMP/win-inputs/postgresql.zip"  | sha256sum -c -
+
+      # ── Build ──────────────────────────────────────────────────────────────────────
+      - name: Build the installer
+        shell: bash
+        env:
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          NODE_WINDOWS_ZIP: ${{ runner.temp }}/win-inputs/node.zip
+          PG_WINDOWS_ZIP: ${{ runner.temp }}/win-inputs/postgresql.zip
+        run: |
+          set -euo pipefail
+          version="${VERSION#listing-node-v}"
+          version="${version#v}"
+          # The installer's own version metadata comes from this value, so a mismatch
+          # between the tag and the file's properties cannot happen.
+          node -e '
+            const fs = require("fs");
+            const p = "Validator/package.json";
+            const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+          '
+          node Installers/listing-node/build-artifacts.mjs \
+            --validator Validator \
+            --out "$RUNNER_TEMP/artifacts" \
+            --version "$version" \
+            --platforms windows
+
+      # ── Signing (only when configured) ─────────────────────────────────────────────
+      - name: Submit to SignPath
+        if: ${{ github.event.inputs.sign != 'false' && secrets.SIGNPATH_API_TOKEN != '' }}
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: listing-node-installer
+          github-artifact-id: listing-node-windows-installer
+          wait-for-completion: true
+          output-artifact-directory: ${{ runner.temp }}/signed
+
+      # A signature changes the bytes. The published hash must describe the signed file, so
+      # it is recomputed here and printed as the release record.
+      - name: Record the SHA-256 of what will be published
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "$RUNNER_TEMP/signed" ]; then
+            cp "$RUNNER_TEMP"/signed/*.exe "$RUNNER_TEMP/artifacts/"
+            echo "signed by SignPath" > "$RUNNER_TEMP/artifacts/.signed"
+          else
+            echo "UNSIGNED build — SignPath secrets are not configured" > "$RUNNER_TEMP/artifacts/.unsigned"
+          fi
+          cd "$RUNNER_TEMP/artifacts"
+          sha256sum omnibazaar-listing-node-*-win-x64-setup.exe | tee SHA256SUMS
+          {
+            echo "## Listing node installer"
+            cat SHA256SUMS
+            echo ""
+            cat .signed 2>/dev/null || cat .unsigned
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: listing-node-windows-installer
+          path: |
+            ${{ runner.temp }}/artifacts/omnibazaar-listing-node-*-win-x64-setup.exe
+            ${{ runner.temp }}/artifacts/SHA256SUMS
+            ${{ runner.temp }}/artifacts/listing-node-artifacts.json
+          if-no-files-found: error
+          retention-days: 30
