@@ -36,6 +36,11 @@ Unicode true
 !ifndef OUTDIR
   !define OUTDIR "dist"
 !endif
+; Where the staged bundle is. Defaults to the historical `out\`, and the release step
+; passes an absolute -DSRCDIR so `makensis` does not have to run inside this folder.
+!ifndef SRCDIR
+  !define SRCDIR "out"
+!endif
 
 !define APPNAME "OmniBazaar Listing Node"
 !define APPEXE "obz-listing-node.cmd"
@@ -51,11 +56,17 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ShowInstDetails show
 
-VIProductVersion "1.0.11.0"
+; Metadata, not decoration: the version MUST come from -DVERSION so the file's own
+; properties agree with the release. It said 1.0.11 while shipping as 1.0.25, and a
+; signer's artifact policy requires product-version attributes to be set and equal in
+; every build. LegalCopyright is required by the same policy (makensis warns without it).
+VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "OmniBazaar"
 VIAddVersionKey "FileDescription" "${APPNAME} installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "LegalCopyright" "© 2026 Omni Administration Ltd"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -87,9 +98,9 @@ Section "Install"
   DetailPrint "Path recorded in: $TEMP\omnibazaar-install-path.txt"
 
   SetOutPath "$INSTDIR\app"
-  File /r "out\app\*"
+  File /r "${SRCDIR}\app\*"
   SetOutPath "$INSTDIR\pgsql"
-  File /r "out\pgsql\*"
+  File /r "${SRCDIR}\pgsql\*"
   SetOutPath "$INSTDIR"
 
   ; 🛑 Prove the copy happened before claiming anything about a database. A report of

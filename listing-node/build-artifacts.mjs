@@ -424,7 +424,7 @@ function main() {
 
   if (targets.includes("windows")) {
     process.stderr.write("building the Windows installer…\n");
-    const bundle = join(HERE, "build-bundle.mjs");
+    const bundle = join(HERE, "..", "listing-node-windows", "build-bundle.mjs");
     if (!existsSync(bundle)) die(`no build-bundle.mjs at ${bundle}`);
     const bundleOut = join(options.out, "windows-bundle");
     const args = [bundle, "--validator", options.validator, "--out", bundleOut];
@@ -444,8 +444,13 @@ function main() {
     const installer = join(options.out, `omnibazaar-listing-node-${options.version}-win-x64-setup.exe`);
     execFileSync(
       "makensis",
-      [`-DVERSION=${options.version}`, `-DOUTDIR=${options.out}`, join(HERE, "omnibazaar-listing-node.nsi")],
-      { cwd: bundleOut, stdio: "inherit" },
+      [
+        `-DVERSION=${options.version}`,
+        `-DOUTDIR=${options.out}`,
+        `-DSRCDIR=${bundleOut}`,
+        join(HERE, "..", "listing-node-windows", "omnibazaar-listing-node.nsi"),
+      ],
+      { cwd: join(HERE, "..", "listing-node-windows"), stdio: "inherit" },
     );
     if (!existsSync(installer)) die(`makensis did not produce ${installer}`);
     // 🛑 Sign BEFORE hashing. The on-chain attestation describes the bytes an operator
