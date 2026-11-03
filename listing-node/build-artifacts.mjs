@@ -196,6 +196,7 @@ export function parseArgs(argv) {
     nodeWinZip: undefined,
     pgWinZip: undefined,
     tar: true,
+    signCommand: undefined,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -239,6 +240,10 @@ export function parseArgs(argv) {
         break;
       case "--no-tar":
         options.tar = false;
+        break;
+      case "--sign-command":
+        options.signCommand = value;
+        i += 1;
         break;
       default:
         die(`Unknown option "${String(flag)}"`);
@@ -307,6 +312,29 @@ function sha256(file) {
 }
 
 /**
+ * Confirm a signature is present and valid, or stop the build.
+ *
+ * A build that reports "signed" without checking is how an unsigned installer gets
+ * published under a signed release's hash.
+ * @param file - Signed artifact.
+ */
+function verifySignature(file) {
+  const isWindows = file.endsWith(".exe") || file.endsWith(".dll");
+  const argv = isWindows
+    ? ["verify", "/pa", "/v", file]
+    : ["--verify", "--verbose=2", file];
+  const command = isWindows ? (process.env.OBZ_SIGNTOOL ?? "signtool") : "osslsigncode";
+  try {
+    execFileSync(command, argv, { stdio: "inherit" });
+  } catch {
+    die(
+      `The signature on ${basename(file)} did not verify. Refusing to publish: an ` +
+        `attested hash of an unsigned or broken installer is worse than no release.`,
+    );
+  }
+}
+
+/**
  * Everything in a directory, relative, sorted.
  * @param root - Directory.
  * @param base - Directory the paths are relative to.
@@ -370,12 +398,21 @@ function main() {
     }
 
     for (const platform of targets.filter((p) => p === "linux" || p === "macos")) {
-      const name = `omnibazaar-listing-node-${options.version}-${platform}-${process.arch}.tar.gz`;
+      // macOS ships as .zip because notarytool accepts .dmg/.pkg/.zip and a bare
+      // .tar.gz cannot be notarized at all. Linux stays .tar.gz.
+      const suffix = platform === "macos" ? ".zip" : ".tar.gz";
+      const name = `omnibazaar-listing-node-${options.version}-${platform}-${process.arch}${suffix}`;
       const file = join(options.out, name);
       // The Windows installer is a directory copy with its own shortcuts; the other
       // two are this archive plus install.sh, so the tree is identical apart from
       // the optional pgsql/ and node/ directories.
-      execFileSync("tar", ["czf", file, "-C", options.out, "listing-node"]);
+      if (platform === "macos") {
+        // `-y` keeps the symlinks Node and PostgreSQL rely on; `-r` is not used on
+        // purpose, so the payload stays a plain directory an operator can inspect.
+        execFileSync("zip", ["-qry", file, "listing-node"], { cwd: options.out });
+      } else {
+        execFileSync("tar", ["czf", file, "-C", options.out, "listing-node"]);
+      }
       artifacts.push({
         platform,
         file: name,
@@ -411,6 +448,16 @@ function main() {
       { cwd: bundleOut, stdio: "inherit" },
     );
     if (!existsSync(installer)) die(`makensis did not produce ${installer}`);
+    // 🛑 Sign BEFORE hashing. The on-chain attestation describes the bytes an operator
+    // downloads, and Authenticode changes those bytes; hash-then-sign would publish an
+    // attestation for a file nobody ever receives.
+    if (options.signCommand !== undefined) {
+      process.stderr.write(`signing ${basename(installer)}…\n`);
+      execFileSync("sh", ["-c", `${options.signCommand} "$1"`, "sign", installer], {
+        stdio: "inherit",
+      });
+      verifySignature(installer);
+    }
     artifacts.push({
       platform: "windows",
       file: basename(installer),

@@ -150,3 +150,55 @@ describe("the install script inside the archive", () => {
     expect(source).toContain('"$here/node/bin/node"');
   });
 });
+
+describe("signing and notarization", () => {
+  it("signs before hashing, so the attested hash is the file an operator gets", () => {
+    // Authenticode changes the bytes. Hash-then-sign publishes an attestation for a
+    // file nobody receives; this asserts the order in the source because the mistake is
+    // invisible in the output (both runs print a hash).
+    const source = readFileSync(
+      join(__dirname, "..", "listing-node", "build-artifacts.mjs"),
+      "utf8",
+    );
+    const signAt = source.indexOf('options.signCommand !== undefined');
+    const hashAt = source.indexOf("sha256: sha256(installer)");
+    expect(signAt).toBeGreaterThan(-1);
+    expect(hashAt).toBeGreaterThan(signAt);
+    expect(source).toContain("verifySignature(installer)");
+  });
+
+  it("refuses to publish when the signature does not verify", () => {
+    const source = readFileSync(
+      join(__dirname, "..", "listing-node", "build-artifacts.mjs"),
+      "utf8",
+    );
+    expect(source).toContain("Refusing to publish");
+    expect(source).toContain('"/pa"');
+  });
+
+  it("ships macOS as a zip, because notarytool cannot accept a tarball", () => {
+    const source = readFileSync(
+      join(__dirname, "..", "listing-node", "build-artifacts.mjs"),
+      "utf8",
+    );
+    expect(source).toContain('platform === "macos" ? ".zip" : ".tar.gz"');
+  });
+
+  it("has a notarization script that signs every Mach-O and refuses to guess", () => {
+    const script = readFileSync(
+      join(__dirname, "..", "listing-node", "macos-notarize.sh"),
+      "utf8",
+    );
+    // The four steps Apple requires, in order.
+    expect(script.indexOf("codesign --force --options runtime")).toBeLessThan(
+      script.indexOf("notarytool submit"),
+    );
+    expect(script).toContain("--keychain-profile");
+    expect(script).toContain("notarytool log");
+    expect(script).toContain("spctl --assess");
+    // It cannot run off a Mac, and says so rather than failing obscurely.
+    expect(script).toContain('if [ "$(uname -s)" != "Darwin" ]');
+    // A nested unsigned binary is the commonest rejection: it is checked before submit.
+    expect(script).toContain("still unsigned");
+  });
+});
