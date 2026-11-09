@@ -115,6 +115,44 @@ MSG
   fi
 fi
 
+# Every file this package will install, checked against the manifest written by the
+# build. Catches a truncated download, a proxy that re-packed the archive, and any file
+# edited after extraction. It does NOT prove who built it - that is the hash published
+# on the OmniCoin chain (see the closing message).
+if [ -f "$here/SHA256SUMS" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    sums="sha256sum -c --quiet"
+  elif command -v shasum >/dev/null 2>&1; then
+    sums="shasum -a 256 -c -s"
+  else
+    sums=""
+  fi
+  if [ -n "$sums" ] && ! ( cd "$here" && $sums SHA256SUMS ); then
+    cat >&2 <<'MSG'
+This package does not match its own file manifest, so nothing has been installed.
+
+That means the download was damaged, or files inside it were changed after it was
+built. Delete it and download it again from https://get.omnibazaar.com/node-software/
+MSG
+    exit 3
+  fi
+fi
+
+# Optional, and the only check that proves provenance rather than integrity: compare the
+# archive you downloaded with the hash this network published on chain. Off by default
+# because it needs the network; pass the path to the file you downloaded:
+#   OBZ_VERIFY_ARCHIVE=/home/you/Downloads/omnibazaar-listing-node-<v>-linux-x64.tar.gz
+if [ -n "\${OBZ_VERIFY_ARCHIVE:-}" ]; then
+  if ! "$node_bin" "$manager" verify --archive "$OBZ_VERIFY_ARCHIVE"; then
+    cat >&2 <<'MSG'
+The downloaded archive does not match the release published on the OmniCoin chain.
+Nothing has been installed. Delete it and download it again from
+https://get.omnibazaar.com/node-software/
+MSG
+    exit 4
+  fi
+fi
+
 db_args="--pg-port \${OBZ_PG_PORT:-55432}"
 if [ -n "\${OBZ_DB_URL:-}" ]; then
   db_args="--db-url $OBZ_DB_URL"
@@ -165,6 +203,11 @@ The node is running. Open your dashboard:
   http://127.0.0.1:$port/
 
 Register it from there — the network pays the gas, so there is nothing to buy.
+
+This package checked its own files against the manifest it was built with. To also
+check that the download is the release published on the OmniCoin chain, run:
+
+  obz-listing-node verify --archive <the file you downloaded>
 MSG
 `;
 }
@@ -197,6 +240,8 @@ export function parseArgs(argv) {
     pgWinZip: undefined,
     tar: true,
     signCommand: undefined,
+    uninstSignCommand: undefined,
+    expectSignature: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -244,6 +289,13 @@ export function parseArgs(argv) {
       case "--sign-command":
         options.signCommand = value;
         i += 1;
+        break;
+      case "--uninst-sign-command":
+        options.uninstSignCommand = value;
+        i += 1;
+        break;
+      case "--verify-signature":
+        options.expectSignature = true;
         break;
       default:
         die(`Unknown option "${String(flag)}"`);
@@ -319,11 +371,16 @@ function sha256(file) {
  * @param file - Signed artifact.
  */
 function verifySignature(file) {
-  const isWindows = file.endsWith(".exe") || file.endsWith(".dll");
-  const argv = isWindows
+  // A PE file is verified with whichever tool this HOST has: `signtool` exists only on
+  // Windows, and the release build runs on Linux and macOS too (either via a Windows
+  // runner or a cloud signer such as Certum SimplySign + ssign).
+  const pe = file.endsWith(".exe") || file.endsWith(".dll");
+  const argv = pe && process.platform === "win32"
     ? ["verify", "/pa", "/v", file]
-    : ["--verify", "--verbose=2", file];
-  const command = isWindows ? (process.env.OBZ_SIGNTOOL ?? "signtool") : "osslsigncode";
+    : ["verify", "-in", file];
+  const command = pe && process.platform === "win32"
+    ? (process.env.OBZ_SIGNTOOL ?? "signtool")
+    : "osslsigncode";
   try {
     execFileSync(command, argv, { stdio: "inherit" });
   } catch {
@@ -351,10 +408,31 @@ function walk(root, base = root) {
 }
 
 /**
+ * Write `SHA256SUMS` for the staged package.
+ *
+ * Why a manifest inside the package: the archive is the only thing an operator has
+ * before they run anything, and an archive that was truncated, re-packed by a proxy,
+ * or edited by hand must be refused rather than installed. This is integrity — it
+ * proves the files are the ones this build packed. Provenance comes from the hash
+ * published on chain, which `obz-listing-node verify --archive` checks.
+ * @param root - Package root.
+ */
+function writeSums(root) {
+  const lines = walk(root)
+    .filter((relative) => relative !== "SHA256SUMS")
+    .map((relative) => `${sha256(join(root, relative))}  ${relative}`);
+  writeFileSync(join(root, "SHA256SUMS"), `${lines.join("\n")}\n`, "utf8");
+}
+
+/**
  * Entry point.
  */
 function main() {
   const options = parseArgs(process.argv.slice(2));
+  // A build that asked to be signed is expected to BE signed: the installer refuses to
+  // run unless its signature is valid, and the release hash then describes signed bytes.
+  const expectSignature =
+    options.expectSignature || options.signCommand !== undefined;
   const work = join(options.out, "listing-node");
   rmSync(work, { recursive: true, force: true });
   const app = join(work, "app");
@@ -364,6 +442,9 @@ function main() {
   stageApp({ validator: options.validator, app, version: options.version });
   assertAppComplete(app);
   writeFileSync(join(work, "install.sh"), installScript(), { encoding: "utf8", mode: 0o755 });
+
+  // The integrity manifest is written last, after every optional part (node runtime,
+  // pgsql, app dependencies) is in place, so it describes what is actually shipped.
 
   if (options.nodeRuntime !== undefined) {
     process.stderr.write("bundling the Node runtime…\n");
@@ -398,6 +479,9 @@ function main() {
     }
 
     for (const platform of targets.filter((p) => p === "linux" || p === "macos")) {
+      // Written here, after pgsql/ and node/ are staged, so the manifest covers every
+      // file the archive actually contains.
+      writeSums(work);
       // macOS ships as .zip because notarytool accepts .dmg/.pkg/.zip and a bare
       // .tar.gz cannot be notarized at all. Linux stays .tar.gz.
       const suffix = platform === "macos" ? ".zip" : ".tar.gz";
@@ -448,6 +532,10 @@ function main() {
         `-DVERSION=${options.version}`,
         `-DOUTDIR=${options.out}`,
         `-DSRCDIR=${bundleOut}`,
+        ...(options.uninstSignCommand === undefined
+          ? []
+          : [`-DUNINSTSIGN=${options.uninstSignCommand}`]),
+        ...(expectSignature ? ["-DVERIFYSIGNATURE=1"] : []),
         join(HERE, "..", "listing-node-windows", "omnibazaar-listing-node.nsi"),
       ],
       { cwd: join(HERE, "..", "listing-node-windows"), stdio: "inherit" },

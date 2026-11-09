@@ -1,33 +1,67 @@
 # Code signing policy
 
-**Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).**
+This policy covers **OmniBazaar software for Windows**: the listing-node installer
+(`omnibazaar-listing-node-<version>-win-x64-setup.exe`) and the uninstaller embedded in
+it. Nothing else is signed under this policy: the macOS and Linux packages are not
+Authenticode-signed (macOS uses Apple notarization), and the web applications ship
+through their own distribution channels.
 
-This policy covers the **OmniBazaar listing node** Windows installer
-(`omnibazaar-listing-node-<version>-win-x64-setup.exe`) published at
-`https://get.omnibazaar.com/node-software/`. Nothing else is signed under this policy: the
-macOS and Linux packages are not Authenticode-signed, the web applications ship through
-their own distribution channels, and no OmniBazaar artifact is signed by a third party
-other than as stated here.
-
-*(The sentence above is required verbatim while the certificate is issued by SignPath
-Foundation. When an OmniBazaar certificate is in place — see
-[`SIGNING_AND_UPDATE_PATH.md`](SIGNING_AND_UPDATE_PATH.md) §2 — the publisher name becomes
-Omni Administration Ltd and this sentence is replaced, not deleted.)*
+The certificate is issued by **Certum** (Asseco) to **Omni Administration Ltd**; the
+private key never leaves Certum's hardware security module, and signing is performed in
+the cloud through **SimplySign**, using the open-source [`ssign`](https://github.com/Le-Syl21/ssign)
+client (MIT licence). The publisher named on the Windows prompt is therefore
+**Omni Administration Ltd**.
 
 ## What the signature means
 
 A valid signature on that file means two separate things:
 
 1. **Origin.** The binary was produced by an automated build from the source at
-   `https://github.com/OmniBazaar/Validator` and `https://github.com/OmniBazaar/Installers`,
-   at the commit named in the release record. It is not a hand-assembled artifact.
-2. **Identity.** The publisher on the Windows prompt is the entity named in the
-   certificate — SignPath Foundation while their certificate is in use, Omni Administration
-   Ltd once ours is.
+   `https://github.com/OmniBazaar/Installers` (which checks out
+   `https://github.com/OmniBazaar/Validator` at the commit named in the release record),
+   and was signed by the release workflow, not hand-assembled and signed on a desk.
+2. **Identity.** The publisher is the legal entity named in the certificate,
+   Omni Administration Ltd.
 
-It does **not** mean the software has been security-audited, and it is not a statement about
-the marketplace's content.
+It does **not** mean the software has been security-audited, and it is not a statement
+about the marketplace's content.
+
+## What the installer checks about itself
+
+The published installer verifies its own signature before it copies a single file, and
+refuses to run if the signature is missing, invalid, or issued to anyone else. Because
+the entire payload (the node, its dependencies and the bundled PostgreSQL) is inside
+that one executable, a valid signature covers every file the installer will write. The
+uninstaller is signed the same way, at build time, so removing the software does not
+raise an "Unknown publisher" prompt.
+
+## How a release is built and signed
+
+1. A tag on `OmniBazaar/Installers` (`listing-node-v<version>`) runs
+   `.github/workflows/listing-node-windows.yml`.
+2. The job declares the `signing` GitHub Environment. Its required-reviewer rule is the
+   approval step: the certificate credentials are not readable until a team member
+   approves the run.
+3. The workflow builds from **reviewable source only** (the build script and workflow are in this repository). Its third-party inputs
+   are pinned by URL **and** SHA-256: Node.js 20.18.0 and the PostgreSQL 16.4 Windows
+   binaries in [`listing-node-windows/tools.lock.json`](listing-node-windows/tools.lock.json),
+   and `ssign` v0.1.11 in the workflow itself. A changed upstream artifact fails the
+   build instead of silently changing what we ship.
+4. The staged tree is checked for completeness before anything is signed: a missing
+   `config/listing-node-surface.json` or a missing PostgreSQL `share/` directory aborts
+   the build rather than producing an installer that fails on an operator's machine.
+5. `makensis` compiles the installer; the signer runs on the installer **and** on the
+   embedded uninstaller; the signature is verified (`osslsigncode verify` / `signtool
+   verify`); only then is the SHA-256 computed. Authenticode changes the bytes, so the
+   hash published in the release record — and attested on the OmniCoin chain — always
+   describes the signed file an operator downloads.
+6. A release whose source commit has not been reviewed does not get signed, and a
+   signing run without an approval does not start.
+
+Reproducing a build: the workflow, the pinned inputs and the staging script are all in
+the repository. The hash of every artifact is published beside the release, and
+`obz-listing-node verify --archive <file>` compares a download with the hash recorded in
+the on-chain `UpdateRegistry`.
 
 ## Team roles
 
@@ -37,34 +71,10 @@ Code signing is approved by a member of the project team, never automatically by
 |---|---|---|
 | **Author** | May change source and build scripts | [OmniBazaar owners](https://github.com/orgs/OmniBazaar/people?query=role%3Aowner) |
 | **Reviewer** | Reviews every change from a non-committer before it merges | [OmniBazaar owners](https://github.com/orgs/OmniBazaar/people?query=role%3Aowner) |
-| **Approver** | Decides that a specific release may be signed; clicks the approval in SignPath | Chris (founder), with a second approver to be added before the first public release |
+| **Approver** | Decides that a specific release may be signed; approves the run | Chris (founder), with a second approver to be added before the first public release |
 
-All members use **multi-factor authentication** on both GitHub and SignPath. A release
-whose source commit has not been reviewed does not get signed; a signing request that
-arrives without a named approval is rejected by the SignPath configuration, not by
-goodwill.
-
-## How a release is built
-
-1. A tag on `OmniBazaar/Installers` runs
-   `.github/workflows/listing-node-windows.yml`.
-2. The workflow builds from **public source only**. Its two third-party inputs are pinned
-   by URL **and** SHA-256 in
-   [`listing-node-windows/tools.lock.json`](listing-node-windows/tools.lock.json) — Node.js
-   20.18.0 and the PostgreSQL 16.4 Windows binaries — so a changed upstream artifact fails
-   the build instead of silently changing what we ship.
-3. The staged tree is checked for completeness before anything is signed: a missing
-   `config/listing-node-surface.json` or a missing PostgreSQL `share/` directory aborts the
-   build rather than producing an installer that fails on an operator's machine.
-4. The signing request is submitted to SignPath with the SHA-256 of the built installer,
-   and is approved by a team member.
-5. The signed installer and its SHA-256 are published. The attestation in the on-chain
-   `UpdateRegistry` records the hash of the **signed** file, so the hash an operator checks
-   is the hash of the bytes they downloaded.
-
-Reproducing a build: the workflow, the two pinned inputs and the staging script are all in
-this repository. A rebuild of the same tag on the same Node version produces the same
-installer; the hash is published beside every release.
+All members use **multi-factor authentication** on GitHub and on the Certum account. The
+SimplySign one-time code is itself the second factor for every signature.
 
 ## Privacy
 
@@ -73,9 +83,9 @@ specifically requested by the user or the person installing or operating it.**
 
 Concretely, the listing node contacts:
 
-- the **gateway** named in its own `listing-node.env` (`GATEWAY_URL`), to sync the listings
-  the operator chose to mirror and to relay a seller's signed listing — this is the
-  product's function, and it is the only destination it is configured with;
+- the **gateway** named in its own `listing-node.env` (`GATEWAY_URL`), to sync the
+  listings the operator chose to mirror and to relay a seller's signed listing — the
+  product's function, and the only destination it is configured with;
 - the **OmniCoin RPC endpoint** named in its own build configuration, to read its
   registration and its fee balance and to send `registerNode` and its own fee claim;
 - the **gas faucet** on that same gateway, once, when the operator registers the node;
@@ -88,12 +98,11 @@ operator's data unless they also ask for it to be deleted.
 
 The installer states what it creates before it creates it (a database cluster and an
 autostart entry inside the operator's own profile, with no administrator rights), and
-provides an uninstaller that never deletes an operator's listings or the node's identity by
-default — the identity holds the key the node's fees are paid to.
+provides an uninstaller that never deletes an operator's listings or the node's identity
+by default — the identity holds the key the node's fees are paid to.
 
 ## Reporting a problem with a signed binary
 
-If you believe a file signed under this policy does not correspond to the published source,
-report it to `support@omnibazaar.com` and to
-[SignPath](mailto:support@signpath.io). A signature that cannot be traced to a reviewed
-commit is treated as a security incident, and the release is withdrawn.
+If you believe a file signed under this policy does not correspond to the published
+source, report it to `support@omnibazaar.com`. A signature that cannot be traced to a
+reviewed commit is treated as a security incident, and the release is withdrawn.

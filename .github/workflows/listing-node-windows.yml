@@ -1,23 +1,26 @@
-# Build the Windows listing-node installer from public source, and sign it.
+# Build the Windows listing-node installer from source, and sign it with Certum.
 #
 # Why this workflow exists: a signature is only worth something if the binary it covers
-# can be traced to a reviewable build. Building the installer on a developer's machine and
-# signing it afterwards proves nothing about the source — and the code-signing certificate
-# we use depends on exactly that (see ../CODE_SIGNING_POLICY.md).
+# can be traced to a reviewable build. Building by hand and signing afterwards proves
+# nothing about the source, so the whole path — stage, compile, sign, verify, hash —
+# runs here, in one approved job.
 #
-# Two properties to keep:
+# Three properties to keep:
 #
-# 1. **Inputs are pinned by URL *and* SHA-256** (listing-node-windows/tools.lock.json).
-#    Node.js and the PostgreSQL Windows binaries are downloaded here, verified, and the
-#    build refuses to continue if either changed. A "silently different upstream artifact"
-#    is the one supply-chain failure a checksum can catch.
-# 2. **Signing is a separate, approved step**, not part of the build. It runs only when the
-#    SignPath secrets are configured, it signs the file this run just produced, and the
-#    SHA-256 is recomputed afterwards — a signature changes the bytes, so a hash recorded
-#    before signing describes a file nobody downloads.
+# 1. **Inputs are pinned by URL *and* SHA-256**, in `listing-node-windows/tools.lock.json`
+#    and below (ssign). A silently changed upstream artifact fails the build instead of
+#    changing what we ship.
+# 2. **Signing is gated by a human.** The job declares `environment: signing`, whose
+#    required-reviewer rule must be clicked before the certificate credentials are even
+#    readable. A pull request cannot trigger a signature.
+# 3. **Sign before hashing.** Authenticode changes the bytes; a hash recorded before
+#    signing describes a file nobody downloads. The hash printed at the end is of the
+#    signed installer, and that is what the release record and the chain must carry.
 #
-# Until SignPath is configured, this workflow still does its job: it produces an unsigned
-# installer and its hash, so the release can be reproduced and compared.
+# The signer is `ssign` (MIT, https://github.com/Le-Syl21/ssign): it talks to the Certum
+# SimplySign cloud directly, so a Linux runner can sign a Windows PE without SimplySign
+# Desktop, a GUI, or a PKCS#11 stack. The uninstaller is signed too, through NSIS's
+# `!uninstfinalize`, otherwise an operator meets "Unknown publisher" when they uninstall.
 
 name: Listing node — Windows installer
 
@@ -28,10 +31,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Base version, e.g. 1.0.12 (no leading v)"
+        description: "Base version, e.g. 1.0.14 (no leading v)"
         required: true
       sign:
-        description: "Submit to SignPath when the secrets are configured"
+        description: "Sign with the Certum certificate (requires the signing environment)"
         type: boolean
         default: true
 
@@ -39,8 +42,11 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: windows-latest
+  build-and-sign:
+    runs-on: ubuntu-latest
+    # Required-reviewer rule on this environment is the approval step: no signature
+    # without a team member clicking it. Secrets live on the environment, not the repo.
+    environment: signing
     steps:
       - name: Checkout Installers
         uses: actions/checkout@v4
@@ -48,8 +54,8 @@ jobs:
           path: Installers
 
       # The Validator is a workspace member: it cannot `npm install` on its own. This
-      # composite action is the same one the release pipeline uses, so a build here and a
-      # build there produce the same `dist/`.
+      # composite action is the same one the release pipeline uses, so a build here and
+      # a build there produce the same `dist/`.
       - name: Reconstruct the build workspace (Validator + WebApp + packages)
         uses: ./Installers/.github/actions/reconstruct-workspace
         with:
@@ -59,7 +65,13 @@ jobs:
         with:
           node-version: "22"
 
-      # ── The two third-party inputs, verified against the pinned recipe ──────────────
+      - name: Install NSIS and the signature verifier
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends nsis osslsigncode
+
+      # ── Third-party build inputs, verified against the pinned recipe ─────────────
       - name: Download and verify the pinned Windows inputs
         shell: bash
         run: |
@@ -74,24 +86,39 @@ jobs:
             console.log(lock.postgresql.sha256);
           ' > "$RUNNER_TEMP/pins.txt"
           mapfile -t PINS < "$RUNNER_TEMP/pins.txt"
-          curl -fsSL -o "$RUNNER_TEMP/win-inputs/node.zip"        "${PINS[0]}"
-          curl -fsSL -o "$RUNNER_TEMP/win-inputs/postgresql.zip"  "${PINS[2]}"
-          echo "${PINS[1]}  $RUNNER_TEMP/win-inputs/node.zip"        | sha256sum -c -
-          echo "${PINS[3]}  $RUNNER_TEMP/win-inputs/postgresql.zip"  | sha256sum -c -
+          curl -fsSL -o "$RUNNER_TEMP/win-inputs/node.zip"       "${PINS[0]}"
+          curl -fsSL -o "$RUNNER_TEMP/win-inputs/postgresql.zip" "${PINS[2]}"
+          echo "${PINS[1]}  $RUNNER_TEMP/win-inputs/node.zip"       | sha256sum -c -
+          echo "${PINS[3]}  $RUNNER_TEMP/win-inputs/postgresql.zip" | sha256sum -c -
 
-      # ── Build ──────────────────────────────────────────────────────────────────────
-      - name: Build the installer
+      # ── The signer, pinned the same way ────────────────────────────────────────────
+      - name: Install ssign (Certum SimplySign client)
+        if: ${{ inputs.sign != 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSIGN_URL="https://github.com/Le-Syl21/ssign/releases/download/v0.1.11/ssign-linux-x86_64.tar.gz"
+          SSIGN_SHA256="54f49ed781fe9284d0f704faf1ca28175f21ea19881abc3fae62437146edc18f"
+          mkdir -p "$RUNNER_TEMP/ssign"
+          curl -fsSL -o "$RUNNER_TEMP/ssign/ssign.tar.gz" "$SSIGN_URL"
+          echo "${SSIGN_SHA256}  $RUNNER_TEMP/ssign/ssign.tar.gz" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/ssign/ssign.tar.gz" -C "$RUNNER_TEMP/ssign"
+          install -m755 "$RUNNER_TEMP/ssign/ssign" /usr/local/bin/ssign
+          ssign --version
+
+      - name: Build and sign the installer
         shell: bash
         env:
-          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          VERSION: ${{ inputs.version || github.ref_name }}
           NODE_WINDOWS_ZIP: ${{ runner.temp }}/win-inputs/node.zip
           PG_WINDOWS_ZIP: ${{ runner.temp }}/win-inputs/postgresql.zip
+          CERTUM_EMAIL: ${{ secrets.CERTUM_EMAIL }}
+          CERTUM_OTP: ${{ secrets.CERTUM_OTP }}
+          SIGN: ${{ inputs.sign }}
         run: |
           set -euo pipefail
           version="${VERSION#listing-node-v}"
           version="${version#v}"
-          # The installer's own version metadata comes from this value, so a mismatch
-          # between the tag and the file's properties cannot happen.
           node -e '
             const fs = require("fs");
             const p = "Validator/package.json";
@@ -99,47 +126,47 @@ jobs:
             pkg.version = process.env.VERSION;
             fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
           '
+
+          # `ssign` reads CERTUM_EMAIL and CERTUM_OTP from the environment. Both the
+          # installer and the embedded uninstaller are signed in one run: ssign caches
+          # its session for 20 minutes, so Certum is asked for one code, not two.
+          SIGN_ARG=()
+          if [ "${SIGN:-true}" != "false" ]; then
+            SIGN_ARG=(
+              --sign-command 'ssign -n "OmniBazaar Listing Node" -u https://omnibazaar.com'
+              --uninst-sign-command 'ssign -n "OmniBazaar Listing Node" -u https://omnibazaar.com "%1"'
+              --verify-signature
+            )
+          fi
+
           node Installers/listing-node/build-artifacts.mjs \
             --validator Validator \
             --out "$RUNNER_TEMP/artifacts" \
             --version "$version" \
-            --platforms windows
+            --platforms windows \
+            "${SIGN_ARG[@]}"
 
-      # ── Signing (only when configured) ─────────────────────────────────────────────
-      - name: Submit to SignPath
-        if: ${{ github.event.inputs.sign != 'false' && secrets.SIGNPATH_API_TOKEN != '' }}
-        id: signpath
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: listing-node-installer
-          github-artifact-id: listing-node-windows-installer
-          wait-for-completion: true
-          output-artifact-directory: ${{ runner.temp }}/signed
-
-      # A signature changes the bytes. The published hash must describe the signed file, so
-      # it is recomputed here and printed as the release record.
+      # A signature changes the bytes, so the hash of what will be published is the hash
+      # of the signed file, recomputed here.
       - name: Record the SHA-256 of what will be published
         shell: bash
         run: |
           set -euo pipefail
-          if [ -d "$RUNNER_TEMP/signed" ]; then
-            cp "$RUNNER_TEMP"/signed/*.exe "$RUNNER_TEMP/artifacts/"
-            echo "signed by SignPath" > "$RUNNER_TEMP/artifacts/.signed"
-          else
-            echo "UNSIGNED build — SignPath secrets are not configured" > "$RUNNER_TEMP/artifacts/.unsigned"
-          fi
           cd "$RUNNER_TEMP/artifacts"
           sha256sum omnibazaar-listing-node-*-win-x64-setup.exe | tee SHA256SUMS
+          file=$(ls omnibazaar-listing-node-*-win-x64-setup.exe)
           {
             echo "## Listing node installer"
             cat SHA256SUMS
             echo ""
-            cat .signed 2>/dev/null || cat .unsigned
+            if [ "${SIGN:-true}" != "false" ]; then
+              osslsigncode verify -in "$file" | sed -n '1,12p'
+            else
+              echo "UNSIGNED build — signing was disabled for this run."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SIGN: ${{ inputs.sign }}
 
       - uses: actions/upload-artifact@v4
         with:

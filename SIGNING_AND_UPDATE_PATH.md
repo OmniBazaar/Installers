@@ -5,11 +5,15 @@ requires of us, what is already built, and what is still a decision. Sections 1�
 research + procedure; section 4 is the design for telling operators about new builds and
 letting them upgrade in one click; section 5 is the short list of decisions.*
 
-Current state, for orientation: the listing-node Windows installer is **unsigned and
-unattested**, published as a test build at
-`https://get.omnibazaar.com/node-software-testing/`. Nothing is published as a release.
-The gateway-validator and listing-node artifacts are both built by the release pipeline
-now (`scripts 7595ed1`), so signing and publishing are the only missing steps.
+**Status, 2026-11-09.** The decision is taken: **Certum OV code signing (SimplySign)
+has been purchased and started**, and §2 is the procedure in force. SignPath Foundation
+(§1) is **not** being pursued — its conditions require public source and an OSI licence
+on every component, and `Installers`/`Validator` are private; keep §1 only as the
+fallback research. The listing-node 1.0.13 release is published and attested on chain
+(Windows installer `7340bdae…`, Linux archive `9c8a6aea…`), **still unsigned**: the
+certificate is in validation. The CI that signs it is prepared and awaiting only the
+certificate credentials — see `.github/workflows/listing-node-windows.yml` (Certum via
+`ssign`, `environment: signing`) and `CODE_SIGNING_POLICY.md`.
 
 ---
 
@@ -98,6 +102,13 @@ integration with our identity on the signature.
 ---
 
 ## 2. Certum OV code signing — findings and the exact steps
+
+> 🟢 **CHOSEN.** Purchased and started 2026-11-09. The signing client used in CI is
+> `ssign` (MIT, `https://github.com/Le-Syl21/ssign`), pinned to v0.1.11 by SHA-256 in the
+> workflow: it logs in to the SimplySign cloud over HTTPS and signs a PE file from a
+> Linux runner, so the release does not depend on a Windows machine or on SimplySign
+> Desktop running under a virtual display. The Linux variant of step 4 below therefore
+> replaces `signtool`: see `.github/workflows/listing-node-windows.yml`.
 
 ### Why Certum
 

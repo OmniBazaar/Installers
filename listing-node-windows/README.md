@@ -137,11 +137,23 @@ These cannot be proven anywhere else, and P4's exit criteria name them:
 - clean Windows 10 22H2 and Windows 11 images, install → list an item → see it in
   search → buy from a second machine → uninstall.
 
-## Signing (founder-gated)
+## Signing
 
-Authenticode signing is a **release** decision, not a coding one: the certificate is
-cloud-held and the signing step is one of the actions the standing rules put behind
-an ask. Until it is signed, Windows SmartScreen shows "Windows protected your PC" on
-first run — the installer works, and that prompt is the honest current state. The
-signing step belongs in `scripts/release/publish-build.mjs`'s Windows path so the
-hash that is attested is the hash of the signed artifact.
+The certificate is **Certum OV through SimplySign**, issued to Omni Administration Ltd.
+Signing is part of the build, not a later step: `build-artifacts.mjs` runs the signer
+between `makensis` and hashing, so the attested hash always describes the signed bytes.
+
+- **CI:** `.github/workflows/listing-node-windows.yml` builds and signs on
+  `ubuntu-latest` with `ssign` (pinned by SHA-256), behind a `signing` environment that
+  needs a human approval. Secrets: `CERTUM_EMAIL`, `CERTUM_OTP` (the TOTP seed).
+- **Locally / from `/publish`:** export the same two variables plus
+  `OBZ_LISTING_NODE_SIGN_COMMAND` and `OBZ_LISTING_NODE_UNINST_SIGN_COMMAND`; see
+  `/publish` §2e.
+- **The uninstaller is signed too** (`!uninstfinalize`), so uninstalling does not raise
+  "Unknown publisher".
+- **The installer checks itself.** A build made with `--verify-signature` refuses to run
+  unless its own Authenticode signature is valid and issued to Omni — the entire payload
+  is inside that executable, so one valid signature covers every file it writes.
+
+Until the certificate is issued, the published installer is unsigned and SmartScreen
+shows "Windows protected your PC"; that prompt is the honest current state.

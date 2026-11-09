@@ -111,10 +111,13 @@ service node (the Phase-1 credential gap is closed). Auto-application stays
 **opt-in** (`OBZ_AUTO_UPDATE_MANDATORY`/`OBZ_AUTO_UPDATE_OPTIONAL`, default off).
 
 Remaining / known caveats:
-- **No `validator`/`service-node` release is published on mainnet yet** —
-  `verifyArtifact` returns `ok:false` ("No on-chain release found") until the
-  first `publishRelease` lands. Auto-update is therefore inert until then.
+- `validator`, `service-node` and `listing-node` releases **are** published on mainnet
+  (`UpdateRegistry` `0xd8E2a242…648B`, all at 1.0.13 as of 2026-11-09), so `verifyArtifact`
+  has a real hash to compare against and the listing node's auto-update path is live.
 - **External-validator P-Chain self-registration** on the PoS subnet is a guided
   manual step (decision 2026-06-01), not yet automated.
-- **OS code-signing certs** (Authenticode / Apple notarization) deferred —
-  first-run "unknown publisher" warnings are expected.
+- **OS code-signing**: Authenticode for the listing-node installer and its uninstaller
+  is being issued by **Certum** (OV, SimplySign) and is wired into CI — see
+  `CODE_SIGNING_POLICY.md` and `SIGNING_AND_UPDATE_PATH.md` §2. Apple notarization of the
+  macOS archive is not done yet; the procedure is in `SIGNING_AND_UPDATE_PATH.md` §3 and
+  in `Mobile/docs/CHRIS_APP_REVIEW_RECORDING_GUIDE.md` (which includes a no-Mac path).

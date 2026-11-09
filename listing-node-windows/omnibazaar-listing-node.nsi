@@ -46,6 +46,18 @@ Unicode true
 !define APPEXE "obz-listing-node.cmd"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniBazaarListingNode"
 
+; Sign the uninstaller too.
+;
+; The uninstaller is a separate PE file embedded inside this installer. Without this,
+; an operator who trusts a signed installer meets "Unknown publisher" exactly when they
+; remove it — the worst moment, because that is when a prompt looks like malware. The
+; release step passes the signer command with -DUNINSTSIGN (see build-artifacts.mjs);
+; `%1` is NSIS's placeholder for the temporary uninstaller file.
+!ifdef UNINSTSIGN
+  !uninstfinalize '${UNINSTSIGN}'
+!endif
+
+
 Name "${APPNAME}"
 ; Build output, not source: `dist/` is gitignored, so a 52 MB installer can
 ; never look like a source change again.
@@ -82,6 +94,29 @@ VIAddVersionKey "LegalCopyright" "© 2026 Omni Administration Ltd"
 
 Section "Install"
   SetShellVarContext current
+
+  ; 🛑 Check our own signature before touching the machine.
+  ;
+  ; A hash printed on a web page only helps someone who already knows to compare it.
+  ; The signature travels with the file, so the installer can refuse to run when it
+  ; has been altered or when the publisher is not us. The whole payload is inside
+  ; this executable, so a valid Authenticode signature covers every file it will copy.
+  ;
+  ; Only compiled in when the release step says the file was signed (-DVERIFYSIGNATURE),
+  ; so an unsigned test build still runs while saying so on stderr.
+  !ifdef VERIFYSIGNATURE
+  DetailPrint "Checking the installer's digital signature ..."
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$s = Get-AuthenticodeSignature -LiteralPath $\"$EXEPATH$\"; if ($$s.Status -ne $\"Valid$\") { exit 1 }; if ($$s.SignerCertificate.Subject -notmatch $\"Omni$\") { exit 1 }; exit 0"'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" signatureOk
+    MessageBox MB_ICONSTOP|MB_OK \
+      "This installer's digital signature is missing, invalid, or was not issued to OmniBazaar.$\r$\n$\r$\nIt may have been changed after it was downloaded. Nothing has been installed.$\r$\n$\r$\nDownload it again from https://get.omnibazaar.com/node-software/"
+    Abort
+  signatureOk:
+  DetailPrint "Signature is valid."
+  !endif
+
   ; Program files are split from the node's data on purpose: `app\` and `pgsql\` are
   ; the software (uninstall deletes them), while `data\`, `config\` and `logs\` are
   ; created at first run and are never touched by an uninstall.
