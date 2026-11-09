@@ -484,8 +484,14 @@ function main() {
       writeSums(work);
       // macOS ships as .zip because notarytool accepts .dmg/.pkg/.zip and a bare
       // .tar.gz cannot be notarized at all. Linux stays .tar.gz.
+      // macOS carries no architecture in the name: the payload is JavaScript and
+      // shell only, so one archive serves Intel and Apple silicon. The Windows name
+      // keeps `-x64` because the installer bundles x64 Node and PostgreSQL.
       const suffix = platform === "macos" ? ".zip" : ".tar.gz";
-      const name = `omnibazaar-listing-node-${options.version}-${platform}-${process.arch}${suffix}`;
+      const name =
+        platform === "macos"
+          ? `omnibazaar-listing-node-${options.version}-macos.zip`
+          : `omnibazaar-listing-node-${options.version}-linux-${process.arch}.tar.gz`;
       const file = join(options.out, name);
       // The Windows installer is a directory copy with its own shortcuts; the other
       // two are this archive plus install.sh, so the tree is identical apart from
