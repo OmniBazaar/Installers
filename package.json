@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Signed, self-configuring installers and hot-update tooling for OmniBazaar gateway validators and service nodes.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "bin": {
     "omnibazaar-artifact": "./dist/shared/cli.js"
   },

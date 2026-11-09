@@ -7,9 +7,9 @@ letting them upgrade in one click; section 5 is the short list of decisions.*
 
 **Status, 2026-11-09.** The decision is taken: **Certum OV code signing (SimplySign)
 has been purchased and started**, and §2 is the procedure in force. SignPath Foundation
-(§1) is **not** being pursued — its conditions require public source and an OSI licence
-on every component, and `Installers`/`Validator` are private; keep §1 only as the
-fallback research. The listing-node 1.0.13 release is published and attested on chain
+(§1) is **not** being pursued: `Installers` is MIT as of 2026-11-09, but the
+repositories it builds from are private, and their conditions require public,
+verifiable builds. Keep §1 only as the fallback research. The listing-node 1.0.13 release is published and attested on chain
 (Windows installer `7340bdae…`, Linux archive `9c8a6aea…`), **still unsigned**: the
 certificate is in validation. The CI that signs it is prepared and awaiting only the
 certificate credentials — see `.github/workflows/listing-node-windows.yml` (Certum via
