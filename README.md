@@ -1,16 +1,18 @@
 # OmniBazaar Installers
 
-Signed, self-configuring installers and hot-update tooling for the two operator
-products:
+Signed, self-configuring installers and hot-update tooling for the **two node tiers an
+operator chooses between**. They are not the same kind of machine:
 
-- **Gateway Validator** — headless Linux server (requires avalanchego + a
-  YugabyteDB cluster + stake + KYC-3). Packaged as `.deb`/`.rpm` + a
-  `curl | bash` bootstrap that wraps `install-gateway-validator.sh`.
+- **Gateway Validator** (tier 1) — headless Linux server that also runs
+  avalanchego, against a shared YugabyteDB cluster, with stake + KYC-3. It takes
+  part in consensus, the oracle and global indexing. Packaged as `.deb`/`.rpm` +
+  a `curl | bash` bootstrap that wraps `install-gateway-validator.sh`.
   → [`gateway-linux/`](gateway-linux/README.md)
-- **Service Node** (also the "listing node" — one role, two names) — laptop-
-  class, anyone-runs, LOCAL P2P listings + local storage only (the RWA / Yield /
-  Predictions / NFT / DEX verticals are gateway-validator surfaces, canonical on
-  `app.omnibazaar.com`). Two surfaces:
+- **Service Node** (tier 2; also called the "listing node" — one role, two names)
+  — laptop-class, anyone-runs, LOCAL P2P listings + local storage only. No
+  avalanchego, no stake, no KYC-3, no consensus, and it never holds user funds.
+  The RWA / Yield / Predictions / NFT / DEX verticals are gateway-validator
+  surfaces, canonical on `app.omnibazaar.com`. Two packaging paths for this tier:
   - a cross-platform **Electron desktop app** (tray UI, onboarding, bundled
     deps; silent WSL2 + YugabyteDB on Windows) → [`service-desktop/`](service-desktop/README.md)
   - a **headless Linux package** wrapping `install-service-node.sh`
