@@ -350,11 +350,33 @@ must never happen is shipping a *Mac-built* artifact re-signed on Linux, because
 signing stacks are not interchangeable mid-artifact; pick the host, then sign and package
 on that host.
 
+**Measured on 2026-11-10, with the real certificate and API key.** Everything below is
+Apple's own verdict from the notary log, not an opinion:
+
+1. **The zip shape is fine.** A `.zip` holding a bare Mach-O is evaluated — Apple's log
+   named the file inside the archive. A first test using an iOS-platform binary produced
+   *"Package has no signed executables or bundles"*, which is Apple telling us an iOS
+   binary is not macOS software, not a packaging problem.
+2. **Re-signing Node's own binary with `rcodesign` on Linux is rejected** —
+   *"The signature of the binary is invalid."* plus *"The signature does not include a
+   secure timestamp."* on the same `node` binary that `rcodesign` itself verifies and
+   stamps. The credentials, the upload and the signing call are all correct: the run
+   authenticated, uploaded, and got a `jobId` and log back. What is unresolved is whether
+   a Linux-produced signature over a binary Apple already signed is acceptable to their
+   validator. **Do not promise notarization from Linux until a macOS-signed artifact
+   passes.** The known-good path is `macos-latest` in CI with `codesign` and
+   `notarytool` — our release workflow already has that runner, and the same certificate
+   (`.p12`) and key (`.p8` + issuer + key id) drop into it as secrets unchanged.
+3. **Credentials live at `~/OmniBazaar/apple/`** (mode 600, not in any repository):
+   `devid.p12` + `devid.p12.password`, `AuthKey_5V38R6JL2S.p8`, and `notary-key.json`
+   (issuer, key id and private key in the one file `--api-key-file` takes). Team ID
+   `347TJ27QGM`, issuer `a82f3a84-4b4b-412c-bb02-f3360e4bf425`, key id `5V38R6JL2S`.
+
 **Still open for macOS:** decide **bundle Node + PostgreSQL** (bigger download, every
 Mach-O signed, makes notarization meaningful) versus **require `brew install node
-postgresql@16`** (smaller, one extra step, what the archive says today); and one real
-Apple-silicon run. Bundling changes the archive's SHA-256, so it needs a new version —
-not a re-hash of a published one.
+postgresql@16`** (smaller, one extra step, what the archive says today); one real
+Apple-silicon run; and a macOS-runner signing test to close finding 2. Bundling changes
+the archive's SHA-256, so it needs a new version — not a re-hash of a published one.
 
 ---
 
