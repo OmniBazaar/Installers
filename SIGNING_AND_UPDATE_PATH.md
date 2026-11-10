@@ -208,6 +208,14 @@ the only shortcut and is not needed.
    reconsider `.pkg` only if we need offline installs.
 6. **Developer ID Application** is the certificate we need. **Developer ID Installer** is a
    *separate* certificate, needed only for `.pkg`.
+7. **The macOS archive we ship today contains no executable code, so fact 3 does not
+   apply to it yet.** `omnibazaar-listing-node-<v>-macos.zip` is JavaScript and shell only
+   (checked 2026-11-10: 8,641 files, zero Mach-O, zero ELF) and it tells the operator to
+   `brew install node postgresql@16`. Gatekeeper only judges Mach-O, so nothing of ours is
+   killed on Apple silicon today — and there is nothing for notarization to judge either.
+   The kill in fact 3 arrives the moment the archive bundles a Node runtime, which is the
+   decision in "Still open" below. Do not describe the current package as notarized or as
+   needing notarization; describe it as JavaScript that runs on the operator's own Node.
 
 ### Steps
 
@@ -252,16 +260,31 @@ codesign --force --options runtime --timestamp \
 
 `--options runtime` (hardened runtime) is mandatory for notarization.
 
-**4. Build the archive after signing.** Already scripted:
+**4. Build the archive after signing.** Already scripted, and there is one script per
+build host — neither needs the other:
 
 ```bash
+# On a Mac (notarytool + the login keychain):
 OBZ_TEAM_ID=TEAMID OBZ_NOTARY_PROFILE=obz-notary \
   ./Installers/listing-node/macos-notarize.sh \
-  omnibazaar-listing-node-<v>-macos-arm64.zip
+  omnibazaar-listing-node-<v>-macos.zip
+
+# On this Linux build host (apple-codesign; no Mac, no keychain):
+OBZ_TEAM_ID=347TJ27QGM \
+OBZ_SIGN_P12=~/apple/devid.p12 OBZ_SIGN_P12_PASSWORD=… \
+OBZ_API_KEY_FILE=~/apple/obz-notary-key.json \
+  ./Installers/listing-node/macos-notarize-linux.sh \
+  omnibazaar-listing-node-<v>-macos.zip
 ```
 
 `macos-notarize.sh` signs every Mach-O, refuses to submit while anything is unsigned,
 submits with `--wait`, prints Apple's own log on failure, and verifies with `spctl`.
+`macos-notarize-linux.sh` does the same job with `rcodesign` (apple-codesign 0.29.0,
+installed at `~/.local/bin/rcodesign` on this host) and adds one honest guard: if the
+archive holds no Mach-O it stops with exit 3 and says so, instead of uploading an archive
+that Apple has nothing to judge. Build the key JSON once with
+`rcodesign encode-app-store-connect-api-key --api-key <id>.p8 --api-issuer <uuid> --api-key-id <id>`
+so the Issuer ID, Key ID and `.p8` travel as one file.
 
 **5. Submit / wait / staple.**
 
@@ -281,13 +304,18 @@ codesign -dv --verbose=4 <binary>
 
 Double-click must open with no prompt.
 
-**7. CI.** Same commands on `macos-latest`; our release workflow already has a macOS job
-for the desktop app. Secrets: `OBZ_TEAM_ID`, the `.p8`, key id, issuer. Sign on the Mac
-runner — never copy signed binaries from Linux.
+**7. CI.** Same commands on `macos-latest`, where `notarytool` and the keychain exist; our
+release workflow already has a macOS job for the desktop app. Secrets: `OBZ_TEAM_ID`, the
+`.p8`, key id, issuer. Signing from Linux is supported (`macos-notarize-linux.sh`) — what
+must never happen is shipping a *Mac-built* artifact re-signed on Linux, because the two
+signing stacks are not interchangeable mid-artifact; pick the host, then sign and package
+on that host.
 
 **Still open for macOS:** decide **bundle Node + PostgreSQL** (bigger download, every
-Mach-O signed) versus **require `brew install node postgresql@16`** (smaller, one extra
-step, what the archive says today); and one real Apple-silicon run.
+Mach-O signed, makes notarization meaningful) versus **require `brew install node
+postgresql@16`** (smaller, one extra step, what the archive says today); and one real
+Apple-silicon run. Bundling changes the archive's SHA-256, so it needs a new version —
+not a re-hash of a published one.
 
 ---
 
