@@ -141,14 +141,28 @@ while IFS= read -r f; do
   fi
 done < "$macho_list"
 
-echo "Verifying our own signatures before uploading"
+echo "Checking what Apple checks before uploading"
+# rcodesign's own `verify` warns that it does not check everything, so it is only half
+# the answer. The other half is the two properties the notary service actually requires
+# and which are visible in the signature: the hardened runtime flag and a secure
+# timestamp. A signature missing either is rejected by Apple, not by us.
 while IFS= read -r f; do
-  if ! rcodesign verify --for-notarization "$f" >/dev/null 2>&1; then
-    echo "verification failed: $f — not uploading an archive Apple will reject" >&2
+  if ! rcodesign verify "$f" >/dev/null 2>&1; then
+    echo "signature verification failed: $f" >&2
     rcodesign print-signature-info "$f" >&2 || true
     exit 4
   fi
+  info=$(rcodesign print-signature-info "$f" 2>/dev/null || true)
+  case "$info" in
+    *"CodeSignatureFlags(RUNTIME)"*) ;;
+    *) echo "hardened runtime flag missing on $f — Apple would reject it" >&2; exit 4 ;;
+  esac
+  case "$info" in
+    *"signing_time:"*) ;;
+    *) echo "no secure timestamp on $f — Apple would reject it" >&2; exit 4 ;;
+  esac
 done < "$macho_list"
+echo "  signed, hardened, timestamped"
 
 echo "Repacking"
 # Replace only the signed copy of the archive; the file name and location stay the

@@ -247,6 +247,27 @@ rcodesign generate-certificate-signing-request --pem-file ~/OmniBazaar/apple/dev
 cp ~/OmniBazaar/apple/devid.csr ~/OmniBazaar/apple/devid.certSigningRequest   # Apple's uploader filters on this
 ```
 
+When the `.cer` comes back, build the signing bundle here (`devid.p12` + a password file
+beside it, both 0600). Two traps, both hit on 2026-11-10:
+
+- **`-legacy` is required.** OpenSSL 3 writes PBES2/AES PKCS#12 by default, and
+  `rcodesign` reports that as *"incorrect password given when decrypting PFX data"* —
+  a misleading message for a format problem.
+- **Put only the leaf certificate in the `.p12`.** With the intermediate appended,
+  `rcodesign` picks the intermediate as the signing identity and refuses with
+  *"current certificate doesn't appear to be such a certificate"*. It fetches and embeds
+  the Developer ID G2 intermediate itself when signing.
+
+```bash
+cd ~/OmniBazaar/apple
+openssl x509 -inform DER -in developerID_application.cer -out devid-cert.pem
+PW=$(openssl rand -base64 24 | tr -d '\n/+=') && printf '%s' "$PW" > devid.p12.password
+openssl pkcs12 -export -legacy -inkey devid.key -in devid-cert.pem \
+  -name "Developer ID Application: Omni Administration Ltd (347TJ27QGM)" \
+  -out devid.p12 -passout "file:devid.p12.password"
+chmod 600 devid.key devid-cert.pem devid.p12 devid.p12.password
+```
+
 **2. Store the notary credential once.** Either an app-specific password
 (appleid.apple.com → Sign-In and Security) or, better for CI, an App Store Connect API key
 (Users and Access → Integrations → Team Keys, download the `.p8` once):
