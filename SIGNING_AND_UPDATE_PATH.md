@@ -227,7 +227,25 @@ security find-identity -v -p codesigning
 ```
 
 If only `Apple Development` appears: Apple Developer portal → Certificates → **+** →
-Developer ID Application. Note the 10-character Team ID.
+under **Software** choose **Developer ID Application** → Continue → upload the CSR
+(`devid.certSigningRequest`) → Continue → Download the `.cer`.
+
+🛑 **That page requires the Account Holder role.** An Admin sees Certificates but not the
+Developer ID entries under *Software* — that is the usual reason the option "is not
+there". Also, when Apple asks for a **Developer ID Certificate Intermediary**, choose
+**G2 Sub-CA (Xcode 11.4.1 or later)**: certificates from the previous authority stop
+signing on 1 February 2027, and G2 certificates are valid one year. If the question is
+not asked, the portal already issues from G2. Verified against Apple's current account
+help, 2026-11-10.
+
+On Linux the CSR is made here, and only the public half leaves the host:
+
+```bash
+openssl genrsa -out ~/apple/devid.key 2048        # private, 0600
+rcodesign generate-certificate-signing-request --pem-file ~/apple/devid.key \
+  --csr-pem-file ~/apple/devid.csr
+cp ~/apple/devid.csr ~/apple/devid.certSigningRequest   # Apple's uploader filters on this
+```
 
 **2. Store the notary credential once.** Either an app-specific password
 (appleid.apple.com → Sign-In and Security) or, better for CI, an App Store Connect API key
