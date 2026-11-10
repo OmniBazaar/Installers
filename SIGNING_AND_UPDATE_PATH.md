@@ -241,10 +241,10 @@ help, 2026-11-10.
 On Linux the CSR is made here, and only the public half leaves the host:
 
 ```bash
-openssl genrsa -out ~/apple/devid.key 2048        # private, 0600
-rcodesign generate-certificate-signing-request --pem-file ~/apple/devid.key \
-  --csr-pem-file ~/apple/devid.csr
-cp ~/apple/devid.csr ~/apple/devid.certSigningRequest   # Apple's uploader filters on this
+openssl genrsa -out ~/OmniBazaar/apple/devid.key 2048        # private, 0600
+rcodesign generate-certificate-signing-request --pem-file ~/OmniBazaar/apple/devid.key \
+  --csr-pem-file ~/OmniBazaar/apple/devid.csr
+cp ~/OmniBazaar/apple/devid.csr ~/OmniBazaar/apple/devid.certSigningRequest   # Apple's uploader filters on this
 ```
 
 **2. Store the notary credential once.** Either an app-specific password
@@ -289,8 +289,8 @@ OBZ_TEAM_ID=TEAMID OBZ_NOTARY_PROFILE=obz-notary \
 
 # On this Linux build host (apple-codesign; no Mac, no keychain):
 OBZ_TEAM_ID=347TJ27QGM \
-OBZ_SIGN_P12=~/apple/devid.p12 OBZ_SIGN_P12_PASSWORD=… \
-OBZ_API_KEY_FILE=~/apple/obz-notary-key.json \
+OBZ_SIGN_P12=~/OmniBazaar/apple/devid.p12 OBZ_SIGN_P12_PASSWORD=… \
+OBZ_API_KEY_FILE=~/OmniBazaar/apple/obz-notary-key.json \
   ./Installers/listing-node/macos-notarize-linux.sh \
   omnibazaar-listing-node-<v>-macos.zip
 ```
