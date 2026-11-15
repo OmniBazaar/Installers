@@ -1,0 +1,98 @@
+name: recon-19398
+# temp read-only recon: locate ValidatorStorageAPI (default 3103) on the validator host,
+# determine bind address / consumers, and prove whether validateValidatorAuth is a
+# zero-credential bypass. Branch is auto-deleted after run. No production data writes:
+# write-endpoint probes use a self-owned CID/service, and mock runs on a local port.
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 12
+    steps:
+      - name: A-locate-service
+        run: |
+          set -x
+          echo "##WHO"; hostname; id; date -u
+          echo "##LISTEN_ALL"
+          (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | head -100
+          echo "##LISTEN_SUDO"
+          sudo -n ss -ltnp 2>/dev/null | head -150
+          echo "##LISTEN_31XX"
+          (ss -ltn 2>/dev/null || true) | grep -E ':(31[0-9][0-9])' || echo "NO-31XX-LISTENER"
+          echo "##LISTEN_3103_DETAIL"
+          sudo -n ss -ltnp 2>/dev/null | grep -E ':3103' || echo "NO-3103-LISTENER"
+          echo "##UNITS"
+          systemctl list-units --type=service --all 2>/dev/null | grep -iE 'storage|validator|gateway' | head -40
+          echo "##PS"
+          ps auxww 2>/dev/null | grep -iE 'StorageServer|ValidatorStorage|3103' | grep -v grep | head -20
+          echo "##PM2"
+          (pm2 jlist 2>/dev/null | head -c 1200) || true
+          echo
+          echo "##ENV_SHELL"
+          echo "PORT_ENV=[${VALIDATOR_STORAGE_PORT:-unset}]"
+          if [ -n "${VALIDATOR_STORAGE_SECRET:-}" ]; then echo "SECRET_ENV_SET=yes"; else echo "SECRET_ENV_SET=no"; fi
+          echo "##ENV_PROC"
+          for p in $(pgrep -f 'gateway-validator.js|service-node.js|listing-node.js|ValidatorMain' 2>/dev/null | head -10); do
+            echo "-- pid $p cmd=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | head -c 140)"
+            sudo -n tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -E 'VALIDATOR_STORAGE|STORAGE_SECRET|^DB_NAME|^DB_HOST' | head -8
+          done
+          echo "##ENV_FILES"
+          sudo -n grep -rn "VALIDATOR_STORAGE" /etc/omnibazaar /home/omnirick/OmniBazaar/Validator/.env 2>/dev/null | head -10
+          echo "##SCRIPTS_REF"
+          grep -rn "StorageServer" /home/omnirick/OmniBazaar/Validator/package.json /home/omnirick/OmniBazaar/Validator/scripts /home/omnirick/OmniBazaar/Validator/systemd /home/omnirick/OmniBazaar/Validator/system-services 2>/dev/null | head -20
+          echo "##NGINX_REF"
+          sudo -n grep -rn "3103" /etc/nginx/ 2>/dev/null | head -20
+          echo "##UFW"
+          sudo -n ufw status 2>/dev/null | head -30
+          echo "##GATEWAY_ROUTE_CHECK"
+          grep -n '"/api/storage\|"/api/validator/trust-score\|"/api/cross-service\|"/api/stats/metrics' /home/omnirick/OmniBazaar/Validator/dist/gateway-validator.js 2>/dev/null | head -10 || echo "no-gateway-route"
+          echo "##DONE_A"
+
+      - name: B-real-endpoint-matrix-if-listening
+        run: |
+          set -x
+          CIDS=bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku
+          JWT_DEF=$(node -e "try{const jwt=require('/home/omnirick/OmniBazaar/Validator/node_modules/jsonwebtoken');console.log(jwt.sign({address:'0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0',role:'validator'}, process.env.VALIDATOR_STORAGE_SECRET||'validator-development-secret'))}catch(e){console.log('ERR')}" 2>/dev/null)
+          echo "JWT_DEF_LEN=${#JWT_DEF}"
+          code=$(curl -sS -m 4 -o /dev/null -w '%{http_code}' http://127.0.0.1:3103/health 2>/dev/null || echo ERR)
+          echo "3103_HEALTH_CODE=$code"
+          if [ "$code" != "200" ]; then echo "##SKIP_REAL_NOT_LISTENING"; exit 0; fi
+          echo "##R0_health"; curl -sS -m 5 http://127.0.0.1:3103/health | head -c 300; echo
+          echo "##R1_metrics_noauth"; curl -sS -m 5 -o /tmp/r.b -w 'code=%{http_code}\n' http://127.0.0.1:3103/api/stats/metrics; head -c 240 /tmp/r.b; echo
+          echo "##R2_metrics_garbageheader"; curl -sS -m 5 -H 'x-validator-signature: AAAA-garbage-19398' -o /tmp/r.b -w 'code=%{http_code}\n' http://127.0.0.1:3103/api/stats/metrics; head -c 240 /tmp/r.b; echo
+          echo "##R3_metrics_jwtdefault"; curl -sS -m 5 -H "Authorization: Bearer $JWT_DEF" -o /tmp/r.b -w 'code=%{http_code}\n' http://127.0.0.1:3103/api/stats/metrics; head -c 200 /tmp/r.b; echo
+          echo "##R4_trustscore_self"; curl -sS -m 5 -X PUT -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"score":0.99}' -o /tmp/r.b -w 'code=%{http_code}\n' "http://127.0.0.1:3103/api/validator/trust-score/$CIDS"; head -c 240 /tmp/r.b; echo
+          echo "##R5_trustscore_restore"; curl -sS -m 5 -X PUT -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"score":0.5}' -o /tmp/r.b -w 'code=%{http_code}\n' "http://127.0.0.1:3103/api/validator/trust-score/$CIDS"; head -c 240 /tmp/r.b; echo
+          echo "##R6_services_self"; curl -sS -m 5 -X POST -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"serviceType":"i19398-recon","endpoint":"http://127.0.0.1:1"}' -o /tmp/r.b -w 'code=%{http_code}\n' http://127.0.0.1:3103/api/validator/services; head -c 240 /tmp/r.b; echo
+          echo "##DONE_B"
+
+      - name: C-auth-impl-mock-matrix
+        run: |
+          set -x
+          echo 'Y29uc3QgcD0nL2hvbWUvb21uaXJpY2svT21uaUJhemFhci9WYWxpZGF0b3IvZGlzdC9zZXJ2aWNlcy9zdG9yYWdlL1N0b3JhZ2VBUEkuanMnOwpjb25zdCB7IFZhbGlkYXRvclN0b3JhZ2VBUEkgfSA9IHJlcXVpcmUocCk7CmNvbnN0IENJRF9PSz0nYmFma3JlaWhkd2RjZWZnaDRkcWtqdjY3dXpjbXc3b2plZTZ4ZWR6ZGV0b2p1empldnRlbnhxdXZ5a3UnOwpjb25zdCBldj17b246KCk9Pnt9LGVtaXQ6KCk9Pnt9LG9uY2U6KCk9Pnt9LHJlbW92ZUxpc3RlbmVyOigpPT57fX07CmNvbnN0IHN0b3JhZ2UgPSBPYmplY3QuYXNzaWduKHt9LGV2LHsKICBzdG9yZUxpc3Rpbmc6IGFzeW5jICgpID0+ICh7IHN1Y2Nlc3M6IHRydWUsIGNpZDogQ0lEX09LIH0pLAogIHN0b3JlQ3Jvc3NTZXJ2aWNlQ29udGVudDogYXN5bmMgKCkgPT4gKHsgc3VjY2VzczogdHJ1ZSwgY2lkOiBDSURfT0sgfSksCiAgcmV0cmlldmVMaXN0aW5nOiBhc3luYyAoKSA9PiAoeyBpZDogJ21vY2snLCB2YWxpZGF0b3JTaWduYXR1cmVzOiBbXSB9KSwKICByZXRyaWV2ZUNyb3NzU2VydmljZUNvbnRlbnQ6IGFzeW5jICgpID0+ICh7IG1vY2s6IHRydWUgfSksCiAgZ2V0VmFsaWRhdG9yU3RvcmFnZVN0YXRzOiBhc3luYyAoKSA9PiAoeyBtb2NrOiB0cnVlIH0pLAogIHJlZ2lzdGVyU2VydmljZTogKCkgPT4ge30sCn0pOwpjb25zdCBzZWFyY2hFbmdpbmUgPSBPYmplY3QuYXNzaWduKHt9LGV2LHsKICBpbmRleExpc3Rpbmc6ICgpID0+IHt9LCBjb25uZWN0U2VydmljZTogKCkgPT4ge30sCiAgc2VhcmNoOiAoKSA9PiAoeyB0b3RhbDogMCwgc2VhcmNoVGltZTogMSwgdmFsaWRhdG9yTWV0cmljczogeyB2YWxpZGF0b3JUcnVzdFNjb3JlOiAwIH0gfSksCiAgZ2V0U3VnZ2VzdGlvbnM6IGFzeW5jICgpID0+IFtdLCBhZGRDcm9zc1NlcnZpY2VSZWZlcmVuY2U6ICgpID0+IHt9LAogIHVwZGF0ZVZhbGlkYXRvclRydXN0U2NvcmU6ICgpID0+IHt9LCBnZXRWYWxpZGF0b3JJbmRleFN0YXRzOiAoKSA9PiAoeyBtb2NrOiB0cnVlIH0pLAp9KTsKY29uc3QgY2ZnID0geyBwb3J0OiAzMTk5LCBjb3JzT3JpZ2luczogWydodHRwOi8vbG9jYWxob3N0J10sCiAgcmF0ZUxpbWl0OiB7IHdpbmRvd01zOiA2MDAwMCwgbWF4OiA1MDAwLCBza2lwU3VjY2Vzc2Z1bFJlcXVlc3RzOiB0cnVlIH0sCiAgYXV0aDogeyBlbmFibGVkOiB0cnVlLCBzZWNyZXRLZXk6IHByb2Nlc3MuZW52LlZBTElEQVRPUl9TVE9SQUdFX1NFQ1JFVCB8fCAndmFsaWRhdG9yLWRldmVsb3BtZW50LXNlY3JldCcsIHZhbGlkYXRvckF1dGg6IHRydWUgfSwKICB2YWxpZGF0b3I6IHsgbm9kZUlkOiAnaTE5Mzk4LXJlY29uJywgZW5hYmxlQ3Jvc3NTZXJ2aWNlOiB0cnVlLCByZXF1aXJlQ29uc2Vuc3VzOiB0cnVlLCB0cnVzdFRocmVzaG9sZDogMC43IH0sCiAgbW9uaXRvcmluZzogeyBlbmFibGVkOiB0cnVlLCBtZXRyaWNzRW5kcG9pbnQ6ICcvbWV0cmljcycsIGFsZXJ0VGhyZXNob2xkczogeyBlcnJvclJhdGU6IDEsIHJlc3BvbnNlVGltZTogMWU5LCBzdG9yYWdlVXNhZ2U6IDFlOSB9IH0gfTsKY29uc3QgYXBpID0gbmV3IFZhbGlkYXRvclN0b3JhZ2VBUEkoc3RvcmFnZSwgc2VhcmNoRW5naW5lLCBjZmcpOwphcGkuc3RhcnQoKS50aGVuKCgpID0+IGNvbnNvbGUubG9nKCdNT0NLX1VQJykpOwpzZXRUaW1lb3V0KCgpID0+IHsgY29uc29sZS5sb2coJ01PQ0tfRVhJVCcpOyBwcm9jZXNzLmV4aXQoMCk7IH0sIDkwMDAwKTsK' | base64 -d > /tmp/i19398_mock.js
+          node /tmp/i19398_mock.js > /tmp/i19398_mock.out 2>&1 &
+          sleep 8
+          head -25 /tmp/i19398_mock.out
+          JWT_DEF=$(node -e "try{const jwt=require('/home/omnirick/OmniBazaar/Validator/node_modules/jsonwebtoken');console.log(jwt.sign({address:'0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0',role:'validator'},'validator-development-secret'))}catch(e){console.log('ERR')}" 2>/dev/null)
+          echo "MOCK_JWT_LEN=${#JWT_DEF}"
+          CIDS=bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku
+          hit(){ printf '%s ' "$1"; curl -sS -m 5 -o /tmp/m.b -w 'code=%{http_code} ' "${@:2}"; head -c 220 /tmp/m.b; echo; }
+          echo "##M0_health_noauth"; hit health http://127.0.0.1:3199/health
+          echo "##M1_metrics_noauth"; hit metrics_noauth http://127.0.0.1:3199/api/stats/metrics
+          echo "##M2_metrics_garbage"; hit metrics_garbage -H 'x-validator-signature: AAAA-garbage-19398' http://127.0.0.1:3199/api/stats/metrics
+          echo "##M3_metrics_hdrx"; hit metrics_hdrx -H 'x-validator-signature: x' http://127.0.0.1:3199/api/stats/metrics
+          echo "##M4_trustscore_garbage"; hit trust_garbage -X PUT -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"score":0.99}' "http://127.0.0.1:3199/api/validator/trust-score/$CIDS"
+          echo "##M5_trustscore_noauth"; hit trust_noauth -X PUT -H 'Content-Type: application/json' -d '{"score":0.99}' "http://127.0.0.1:3199/api/validator/trust-score/$CIDS"
+          echo "##M6_services_garbage"; hit svc_garbage -X POST -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"serviceType":"i19398-recon","endpoint":"http://203.0.113.9:19998"}' http://127.0.0.1:3199/api/validator/services
+          echo "##M7_listings_garbage"; hit listings_garbage -X POST -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"id":"i19398-self","type":"art","title":"i19398 self-test","description":"self","sellerId":"0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0","validatorRequirements":{"trustScoreRequired":0.99}}' http://127.0.0.1:3199/api/storage/listings
+          echo "##M8_crossref_garbage"; hit crossref_garbage -X POST -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"fromCid":"x","toCid":"y","service":"marketplace"}' http://127.0.0.1:3199/api/cross-service/references
+          echo "##M9_crosscontent_garbage"; hit crosscontent_garbage -X POST -H 'x-validator-signature: garbage' -H 'Content-Type: application/json' -d '{"content":{"t":"i19398"},"serviceType":"marketplace","contentType":"listing","accessLevel":"public"}' http://127.0.0.1:3199/api/cross-service/content
+          echo "##M10_jwt_default_secret"; hit jwt_default -H "Authorization: Bearer $JWT_DEF" http://127.0.0.1:3199/api/stats/metrics
+          echo "##M11_jwt_bogus"; hit jwt_bogus -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.bad' http://127.0.0.1:3199/api/stats/metrics
+          echo "##M12_search_noauth"; hit search http://127.0.0.1:3199/api/search/listings
+          pkill -f i19398_mock.js || true
+          echo "##DONE_C"
