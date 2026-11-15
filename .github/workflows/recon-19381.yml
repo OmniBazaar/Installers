@@ -1,0 +1,124 @@
+name: recon-19381
+# temp read-only recon tunnel validation (branch auto-deleted after run)
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: write
+jobs:
+  tunnel:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: read-only recon via self-hosted runner
+        run: |
+          set -x
+          UA='OmniBazaar-recon-19381'
+          SUBNET=B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK
+          echo "##HOST"; hostname; id; date -u
+          echo "##LISTEN"
+          ss -ltn 2>/dev/null | grep -E ':(9650|9651|3001|8080)\b' | head -20 || true
+          echo "##VIP"
+          ip -4 -o addr show enp7s0 2>/dev/null | awk '{print $4}' | head -10 || true
+
+          echo "##S1-loopback-vs-vip"
+          for H in 127.0.0.1 65.108.205.116; do
+            printf 'C-chain@%s ' "$H"
+            curl -sS -m 5 -o /tmp/c_$H.json -w 'code=%{http_code} size=%{size_download} t=%{time_total}\n' \
+              -A "$UA" -X POST "http://$H:9650/ext/bc/C/rpc" -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' 2>&1 | tail -1
+            head -c 200 /tmp/c_$H.json 2>/dev/null; echo
+          done
+
+          echo "##S2-five-nodes"
+          for H in 65.108.205.116 65.108.205.92 65.108.205.99 65.108.205.100 65.108.205.101; do
+            printf 'C@%s ' "$H"
+            curl -sS -m 5 -A "$UA" -X POST "http://$H:9650/ext/bc/C/rpc" -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' || true
+            echo
+            printf 'SN@%s ' "$H"
+            curl -sS -m 5 -A "$UA" -X POST "http://$H:9650/ext/bc/$SUBNET/rpc" -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' || true
+            echo
+          done
+
+          echo "##S2b-info-getNodeID"
+          for H in 65.108.205.116 65.108.205.92; do
+            printf 'info@%s ' "$H"
+            curl -sS -m 5 -A "$UA" -X POST "http://$H:9650/ext/info" -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID","params":[]}' | head -c 170 || true
+            echo
+          done
+
+          echo "##S3-vhost-health"
+          for V in app.omnibazaar.com admin.omnibazaar.com api.omnibazaar.com explorer.omnicoin.net rpc.omnicoin.net validator-1.omnibazaar.com validator-2.omnibazaar.com validator-3.omnibazaar.com validator-4.omnibazaar.com validator-5.omnibazaar.com gateway-1.omnibazaar.com; do
+            printf 'health %-28s ' "$V"
+            curl -sS -m 5 -A "$UA" -o /tmp/h_$V -D /tmp/hd_$V \
+              -w 'code=%{http_code} size=%{size_download} t=%{time_total}\n' "https://$V/health" 2>&1 | tail -1
+            grep -iE '^(server|content-type):' /tmp/hd_$V 2>/dev/null | tr -d '\r' | head -2
+            head -c 120 /tmp/h_$V 2>/dev/null; echo
+          done
+
+          echo "##S3b-gateway-3001"
+          printf '3001@127.0.0.1 '
+          curl -sS -m 5 -A "$UA" -o /dev/null -w 'code=%{http_code} t=%{time_total}\n' http://127.0.0.1:3001/health || true
+          printf '3001@vip '
+          curl -sS -m 5 -A "$UA" -o /dev/null -w 'code=%{http_code} t=%{time_total}\n' http://65.108.205.116:3001/health || true
+
+          echo "##S4-controls"
+          printf 'POS app /health '
+          curl -sS -m 5 -A "$UA" -o /dev/null -w 'code=%{http_code} t=%{time_total}\n' https://app.omnibazaar.com/health || true
+          printf 'NEG app /api/v1/orders(noauth) '
+          curl -sS -m 5 -A "$UA" -o /tmp/neg.b -w 'code=%{http_code} size=%{size_download} t=%{time_total}\n' https://app.omnibazaar.com/api/v1/orders || true
+          head -c 160 /tmp/neg.b 2>/dev/null; echo
+          printf 'POS blockchain-proxy eth_chainId '
+          curl -sS -m 6 -A "$UA" -X POST https://app.omnibazaar.com/api/v1/blockchain/ethereum/rpc \
+            -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' -w ' code=%{http_code} t=%{time_total}\n' || true
+          printf 'NEG meta-mask-proxy disallowed method '
+          curl -sS -m 6 -A "$UA" -X POST https://app.omnibazaar.com/api/v1/blockchain/ethereum/rpc \
+            -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_accounts","params":[]}' -w ' code=%{http_code}\n' | head -c 200; echo
+
+          echo "##S5-explorer-readonly"
+          for P in "/api/v1/blocks?limit=2" "/api/v1/stats" "/api/v1/explorer/search?q=0x1eE61487F08F715055358A1F020A86c9E571ED78&type=address"; do
+            printf 'explorer %-72s ' "$P"
+            curl -sS -m 6 -A "$UA" -o /tmp/e.b -D /tmp/e.h -w 'code=%{http_code} size=%{size_download} t=%{time_total}\n' "https://explorer.omnicoin.net$P" 2>&1 | tail -1
+            grep -iE '^(server|content-type|x-ratelimit-limit):' /tmp/e.h 2>/dev/null | tr -d '\r' | head -3
+            head -c 160 /tmp/e.b 2>/dev/null; echo
+          done
+
+          echo "##S6-body-completeness"
+          curl -sS -m 8 -A "$UA" -D /tmp/app.h -o /tmp/app.html -w 'APP code=%{http_code} bytes=%{size_download} t=%{time_total}\n' https://app.omnibazaar.com/ || true
+          wc -c /tmp/app.html; sha256sum /tmp/app.html | cut -c1-64
+          grep -o '<title>[^<]*</title>' /tmp/app.html | head -1 || true
+          grep -iE '^(content-length|content-encoding|content-type|server):' /tmp/app.h | tr -d '\r' | cut -c1-160
+          curl -sS -m 10 -A "$UA" -D /tmp/blk.h -o /tmp/blk.json -w 'BLK50 code=%{http_code} bytes=%{size_download} t=%{time_total}\n' "https://explorer.omnicoin.net/api/v1/blocks?limit=50" || true
+          wc -c /tmp/blk.json 2>/dev/null; sha256sum /tmp/blk.json 2>/dev/null | cut -c1-64
+          grep -iE '^(content-encoding|content-length):' /tmp/blk.h | tr -d '\r'
+          python3 -c "
+import json
+d=json.load(open('/tmp/blk.json'))
+n=len(d) if isinstance(d,(list,dict)) else -1
+print('JSON_PARSE_OK type=%s len=%s' % (type(d).__name__, n))
+items = d if isinstance(d,list) else d.get('blocks') or d.get('data') or []
+print('FIRST=%s' % json.dumps(items[0])[:150] if items else 'FIRST=none')
+print('LAST=%s' % json.dumps(items[-1])[:150] if items else 'LAST=none')
+" 2>&1 | head -6 || true
+
+          echo "##S7-eth_call-88008"
+          printf 'XOM.balanceOf(deployer)@88008 '
+          curl -sS -m 6 -A "$UA" -X POST "http://65.108.205.116:9650/ext/bc/$SUBNET/rpc" -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x1eE61487F08F715055358A1F020A86c9E571ED78","data":"0x70a08231000000000000000000000000021868f2e3d49c059ef52b539aaa933b437e0321"},"latest"]}' | head -c 300 || true
+          echo
+          printf 'blockNumber t0 '
+          curl -sS -m 5 -A "$UA" -X POST "http://65.108.205.116:9650/ext/bc/$SUBNET/rpc" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' || true
+          echo
+          sleep 5
+          printf 'blockNumber t1 '
+          curl -sS -m 5 -A "$UA" -X POST "http://65.108.205.116:9650/ext/bc/$SUBNET/rpc" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' || true
+          echo
+
+          echo "##S8-timeouts"
+          printf 'slow-path 30s-max test '
+          curl -sS -m 30 -A "$UA" -o /dev/null -w 'code=%{http_code} t=%{time_total}\n' "https://explorer.omnicoin.net/api/v1/blocks?limit=200" || true
+          echo "curl: $(curl --version | head -1)"
+          echo "##DONE"
