@@ -146,6 +146,17 @@ between `makensis` and hashing, so the attested hash always describes the signed
 - **CI:** `.github/workflows/listing-node-windows.yml` builds and signs on
   `ubuntu-latest` with `ssign` (pinned by SHA-256), behind a `signing` environment that
   needs a human approval. Secrets: `CERTUM_EMAIL`, `CERTUM_OTP` (the TOTP seed).
+- 🛑 **The approval does not exist yet.** The `signing` environment was created on
+  2026-11-15 and GitHub refused the required-reviewer rule: protection rules on a
+  *private* repository need GitHub Pro/Team/Enterprise, and `OmniBazaar` is on the Free
+  plan. An environment with no protection rule is worse than none, because the workflow
+  looks gated. Until the plan is upgraded or `Installers` is made public (it is MIT, and
+  `CODE_SIGNING_POLICY.md` already publishes it as the build source), **do not store
+  `CERTUM_EMAIL`/`CERTUM_OTP`**: a tag push would then sign without an approval.
+- **Capture the TOTP seed, not just the QR.** `CERTUM_OTP` is the base32 seed behind the
+  SimplySign QR code shown once at activation (ssign accepts the seed or the full
+  `otpauth://` URI). Scanning it only into a phone leaves CI with nothing to log in
+  with, and the fix is a QR re-issue at Certum.
 - **Locally / from `/publish`:** export the same two variables plus
   `OBZ_LISTING_NODE_SIGN_COMMAND` and `OBZ_LISTING_NODE_UNINST_SIGN_COMMAND`; see
   `/publish` §2e.
