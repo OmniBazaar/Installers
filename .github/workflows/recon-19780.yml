@@ -1,0 +1,80 @@
+name: recon-19780
+# temp read-only recon (branch auto-deleted via API by the operator): listmonk at list.omnibazaar.com
+on:
+  push:
+    branches: ["recon*"]
+permissions:
+  contents: read
+jobs:
+  listmonk:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 12
+    steps:
+      - name: read-only listmonk config / container / db probe
+        shell: bash
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19780'
+          echo "##A-host"; hostname; id; date -u
+          echo "##B-config-full"
+          sudo -n cat /opt/listmonk/config.toml 2>&1
+          echo "##B2-config-stat"
+          sudo -n stat -c '%A %U:%G %s %y %n' /opt/listmonk/config.toml /opt/listmonk 2>&1
+          sudo -n ls -la /opt/listmonk 2>&1
+          echo "##C-docker-ps"
+          sudo -n docker ps --format '{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}' 2>&1 | head -30
+          echo "##C2-inspect-listmonk"
+          sudo -n docker inspect listmonk-app-1 --format '{{json .Config.Env}}' 2>&1 | head -c 3000; echo
+          sudo -n docker inspect listmonk-app-1 --format '{{.Config.Cmd}} | {{.Config.Entrypoint}} | {{.Config.Image}} | {{.Created}}' 2>&1
+          echo "##C3-listmonk-version"
+          sudo -n docker exec listmonk-app-1 /listmonk --version 2>&1 | head -5
+          sudo -n docker exec listmonk-app-1 ls -la / 2>&1 | head -20
+          echo "##D-db-tables-and-counts"
+          DB=$(sudo -n docker ps --format '{{.Names}}' | grep -iE 'listmonk.*(db|postgres)' | head -1)
+          echo "DB_CONTAINER=$DB"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select table_name from information_schema.tables where table_schema='public' order by 1" 2>&1 | tr '\n' ' '; echo
+          for T in subscribers lists campaigns templates users roles media settings; do
+            printf '%s=' "$T"
+            sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select count(*) from $T" 2>&1 | tail -1
+          done
+          echo "##E-subscriber-sample"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select id, email, name, status, created_at, substr(attribs::text,1,200) from subscribers order by id limit 3" 2>&1
+          echo "##E2-subscriber-columns"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select column_name from information_schema.columns where table_name='subscribers' order by ordinal_position" 2>&1 | tr '\n' ' '; echo
+          echo "##E3-lists"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select id,name,type,optin,subscriber_count from lists order by id" 2>&1
+          echo "##E4-users(admin accounts)"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select id,username,name,email,type,user_role_id,substr(password,1,12) from users order by id" 2>&1
+          echo "##E5-campaigns"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select id,name,status,subject,substr(body,1,80),created_at from campaigns order by id desc limit 10" 2>&1
+          echo "##E6-templates"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select id,name,type,created_at from templates order by id" 2>&1
+          echo "##F-local-http-admin"
+          for P in /health /api/health /api/config /api/lists /api/subscribers /api/serverconfig /api/about /admin/login; do
+            printf '%-20s ' "$P"
+            curl -sS -m 6 -A "$UA" -o /tmp/p_$$.b -w 'code=%{http_code} size=%{size_download}\n' "http://127.0.0.1:9010$P" 2>&1 | tail -1
+            head -c 180 /tmp/p_$$.b 2>/dev/null; echo
+          done
+          echo "##G-basicauth-tests(uses password from config, not echoed)"
+          U=$(sudo -n sed -n 's/^admin_username *= *"\(.*\)"/\1/p' /opt/listmonk/config.toml | head -1)
+          PW=$(sudo -n sed -n 's/^admin_password *= *"\(.*\)"/\1/p' /opt/listmonk/config.toml | head -1)
+          echo "admin_username=$U  pass_len=${#PW}"
+          for P in /api/lists /api/subscribers /api/health /api/serverconfig /api/campaigns /api/users; do
+            printf '%-22s ' "$P"
+            curl -sS -m 8 -A "$UA" -u "$U:$PW" -o /tmp/q_$$.b -w 'basic code=%{http_code} size=%{size_download}\n' "http://127.0.0.1:9010$P" 2>&1 | tail -1
+            head -c 260 /tmp/q_$$.b 2>/dev/null; echo
+          done
+          echo "##H-login-token-flow"
+          BODY="{\"username\":\"$U\",\"password\":\"$PW\"}"
+          curl -sS -m 8 -A "$UA" -X POST -H 'Content-Type: application/json' \
+            -d "$BODY" -o /tmp/l_$$.b -w 'login-json code=%{http_code}\n' "http://127.0.0.1:9010/api/login" 2>&1 | tail -1
+          head -c 300 /tmp/l_$$.b 2>/dev/null; echo
+          echo "--- try 127.0.0.1:9000 (app.address) too"
+          curl -sS -m 6 -A "$UA" -o /dev/null -w 'port9000 code=%{http_code}\n' "http://127.0.0.1:9000/health" 2>&1 | tail -1
+          echo "--- list nginx proxy target for list vhost"
+          sudo -n grep -rE 'proxy_pass|listen|server_name' /etc/nginx/sites-enabled/ 2>/dev/null | grep -iE 'list|9010|9000' | head -20
+          echo "##I-smtp-settings"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select key, value from settings where key ilike '%smtp%' or key ilike '%mail%' order by key" 2>&1 | head -20
+          echo "##J-bounces-and-imports"
+          sudo -n docker exec "$DB" psql -U listmonk -d listmonk -Atc "select count(*) from bounces" 2>&1 | tail -1
+          echo "##DONE"
