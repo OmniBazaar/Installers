@@ -45,7 +45,11 @@ runs:
       shell: bash
       working-directory: Coin
       # Coin gitignores its package-lock.json, so there is nothing for `npm ci` to pin to.
-      run: npm install --no-audit --no-fund
+      # `--legacy-peer-deps` is required because Coin's dependency tree contains a peer
+      # conflict we do not own (`@eth-optimism/contracts` peers ethers ^5 while the project
+      # runs ethers 6). It only relaxes peer *validation*; the installed versions are the
+      # ones Coin declares, and the compile output is unaffected.
+      run: npm install --no-audit --no-fund --legacy-peer-deps
     - name: Compile the contract artifacts
       shell: bash
       working-directory: Coin
