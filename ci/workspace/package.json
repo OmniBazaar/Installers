@@ -69,7 +69,6 @@
     "to-valid-identifier": "^1.0.0"
   },
   "overrides": {
-    "@swc/wasm": "1.15.47",
     "@noble/hashes": "$@noble/hashes",
     "@openzeppelin/contracts": "~5.3.0",
     "@openzeppelin/contracts-upgradeable": "~5.3.0",
