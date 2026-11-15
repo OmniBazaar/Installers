@@ -143,6 +143,30 @@ The certificate is **Certum OV through SimplySign**, issued to Omni Administrati
 Signing is part of the build, not a later step: `build-artifacts.mjs` runs the signer
 between `makensis` and hashing, so the attested hash always describes the signed bytes.
 
+**Issued 2026-11-15 and proven the same day** — a real installer signed and verified:
+
+| Field | Value |
+|---|---|
+| Subject | `C=VG, L=Road Town, O=Omni Administration Ltd, CN=Omni Administration Ltd` |
+| Issuer | `CN=Certum Code Signing 2021 CA` (Asseco Data Systems S.A.) |
+| Validity | 2026-11-15 → 2027-11-15, one year |
+| Timestamp | `CN=Certum Timestamping 2021 CA`, SHA-384 |
+
+There is no key file and never will be — it lives in Certum's HSM. The `.pem`/`.cer` you
+can download are the public certificate only and are not needed to sign. To sign from a
+Linux host with `ssign`, read a code from the SimplySign app instead of storing a seed:
+
+```bash
+read -rsp "SimplySign code: " CERTUM_TOKEN; echo
+CERTUM_EMAIL=<the SimplySign account> ssign -T "$CERTUM_TOKEN" \
+  -n "OmniBazaar Listing Node" -u https://omnibazaar.com -o <outdir> <installer.exe>
+osslsigncode verify -in <outdir>/<installer.exe> \
+  -CAfile /etc/ssl/certs/ca-certificates.crt -TSA-CAfile /etc/ssl/certs/ca-certificates.crt
+```
+
+Both `verification: ok` lines must appear: without `-CAfile`/`-TSA-CAfile`, `osslsigncode`
+reports the signature as good and the timestamp as failed, which looks like success.
+
 - **CI:** `.github/workflows/listing-node-windows.yml` builds and signs on
   `ubuntu-latest` with `ssign` (pinned by SHA-256), behind a `signing` environment that
   needs a human approval. Secrets: `CERTUM_EMAIL`, `CERTUM_OTP` (the TOTP seed).

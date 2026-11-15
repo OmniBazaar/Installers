@@ -56,8 +56,11 @@ raise an "Unknown publisher" prompt.
    `config/listing-node-surface.json` or a missing PostgreSQL `share/` directory aborts
    the build rather than producing an installer that fails on an operator's machine.
 5. `makensis` compiles the installer; the signer runs on the installer **and** on the
-   embedded uninstaller; the signature is verified (`osslsigncode verify` / `signtool
-   verify`); only then is the SHA-256 computed. Authenticode changes the bytes, so the
+   embedded uninstaller; the signature **and its timestamp** are verified (`osslsigncode
+   verify -CAfile … -TSA-CAfile …` / `signtool verify`); only then is the SHA-256
+   computed. Verified on 2026-11-15 against a real signed installer: subject
+   `C=VG, L=Road Town, O=Omni Administration Ltd, CN=Omni Administration Ltd`, issuer
+   `CN=Certum Code Signing 2021 CA`, timestamp from `CN=Certum Timestamping 2021 CA`. Authenticode changes the bytes, so the
    hash published in the release record — and attested on the OmniCoin chain — always
    describes the signed file an operator downloads.
 6. A release whose source commit has not been reviewed does not get signed, and a
