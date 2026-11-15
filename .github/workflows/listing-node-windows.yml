@@ -60,6 +60,8 @@ jobs:
         uses: ./Installers/.github/actions/reconstruct-workspace
         with:
           token: ${{ secrets.OBZ_CHECKOUT_TOKEN }}
+          # The installer does not contain the app; building it here only added a failure.
+          build-webapp: "false"
 
       - uses: actions/setup-node@v4
         with:

@@ -2,7 +2,7 @@ name: Reconstruct build workspace
 description: >
   Check out the sibling OmniBazaar repos the installer build needs (Validator,
   WebApp, Packages), restore the CI-pinned root workspace manifest, run the npm
-  workspace install, and build Validator + WebApp. Assumes the Installers repo is
+  workspace install, and build Validator (plus WebApp unless `build-webapp` is false). Assumes the Installers repo is
   already checked out at ./Installers and Node is set up. Leaves the workspace at
   the job root looking like a dev machine's ~/OmniBazaar tree.
 
@@ -10,6 +10,12 @@ inputs:
   token:
     description: Token with read access to the OmniBazaar Validator/WebApp/Packages repos.
     required: true
+  build-webapp:
+    description: >
+      Build WebApp/build. The gateway release serves it and needs it; the listing-node
+      installer does not contain the app and passes false.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -72,10 +78,11 @@ runs:
       shell: bash
       working-directory: Validator
       run: npm run build
-    # Deliberately NO WebApp build. The listing-node installer contains the Validator
-    # (node + console), config, migrations, the PostgreSQL binaries and the Node runtime —
-    # `listing-node/build-artifacts.mjs` never reads `WebApp/`, and its REQUIRED_APP list
-    # has no web artifact. The WebApp build was copied in from the gateway release, where
-    # `WebApp/build/` IS the validator's served front end; here it only added a bundler to
-    # fail for reasons that cannot affect the artifact (2026-11-15: vite-plugin-top-level-
-    # await aborts on a fresh install). The gateway pipeline still builds it.
+    - name: Build WebApp (vite -> build)
+      if: ${{ inputs.build-webapp != 'false' }}
+      shell: bash
+      working-directory: WebApp
+      # Skipped only for the listing-node installer, whose payload is the Validator, its
+      # config and migrations, PostgreSQL and the Node runtime — `build-artifacts.mjs`
+      # never reads `WebApp/`. The gateway release serves `WebApp/build/`, so it builds it.
+      run: npm run build
