@@ -72,7 +72,10 @@ runs:
       shell: bash
       working-directory: Validator
       run: npm run build
-    - name: Build WebApp (vite -> build)
-      shell: bash
-      working-directory: WebApp
-      run: npm run build
+    # Deliberately NO WebApp build. The listing-node installer contains the Validator
+    # (node + console), config, migrations, the PostgreSQL binaries and the Node runtime —
+    # `listing-node/build-artifacts.mjs` never reads `WebApp/`, and its REQUIRED_APP list
+    # has no web artifact. The WebApp build was copied in from the gateway release, where
+    # `WebApp/build/` IS the validator's served front end; here it only added a bundler to
+    # fail for reasons that cannot affect the artifact (2026-11-15: vite-plugin-top-level-
+    # await aborts on a fresh install). The gateway pipeline still builds it.
