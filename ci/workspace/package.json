@@ -104,7 +104,7 @@
     "metro-source-map": "~0.84.0",
     "metro-transform-plugins": "~0.84.0",
     "metro-transform-worker": "~0.84.0",
-    "@noble/curves": "$@noble/curves",
+    "_comment_noble_curves": "No global @noble/curves override. A `$@noble/curves` self-override pins the workspaces at v1, and WebApp is on v2 (it calls weierstrass(definition, {Fp}) and types against WeierstrassPointCons, which are v2-only). Without the override npm gives WebApp its v2 copy and the Validator its v1 copy, which is what a working dev tree has. Re-add only with a demonstration that both builds still pass.",
     "@noble/hashes": "$@noble/hashes",
     "@scure/bip32": {
       "@noble/hashes": "1.4.0"
