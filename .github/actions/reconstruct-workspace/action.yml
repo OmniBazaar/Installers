@@ -60,18 +60,14 @@ runs:
       shell: bash
       working-directory: Coin
       run: npx hardhat compile
-    - name: Install Wallet's own dependencies
-      shell: bash
-      working-directory: Wallet
-      # Wallet is deliberately NOT a workspace member: it declares vite ^8 while
-      # @vitejs/plugin-react ^4 peers at most vite ^7, and the only version that accepts
-      # vite 8 (plugin-react 6) is a rolldown-era rewrite with new peers. That conflict is
-      # Wallet's own to settle. Here it only has to *resolve*, because WebApp's typecheck
-      # follows the @wallet/* alias into Wallet/src; nothing bundles Wallet in this job.
-      run: npm install --no-audit --no-fund --legacy-peer-deps
     - name: Workspace install (hoist deps, link @omnibazaar/* + vendored tarballs)
       shell: bash
-      run: npm install
+      # `--legacy-peer-deps` is required for Wallet, which declares vite ^8 while
+      # @vitejs/plugin-react ^4 peers at most vite ^7 (the only plugin-react that accepts
+      # vite 8 is the rolldown-era rewrite). Wallet must stay a workspace member all the
+      # same: it depends on @omnibazaar/i18n-locales, which only exists as a workspace
+      # link, and WebApp's typecheck follows the @wallet/* alias into Wallet/src.
+      run: npm install --no-audit --no-fund --legacy-peer-deps
     - name: Build Validator (tsc -> dist)
       shell: bash
       working-directory: Validator
