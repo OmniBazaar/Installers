@@ -1,0 +1,65 @@
+name: recon-19383-v5
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe5:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: read-only node-software serve mapping + installer scripts
+        run: |
+          set +e
+          D=/home/omnirick/OmniBazaar/Validator/dist
+          echo "=== A. locate the /node-software static mount in dist (broad) ==="
+          grep -rn "node-software" $D --include=*.js | wc -l
+          grep -rn "node-software" $D --include=*.js | grep -viE "console|locales|get\.omnibazaar" | head -10
+          echo "--- express.static mounts (all, with next line) ---"
+          grep -rn -A2 "express_1.default.static\|express\.static" $D/gateway-validator.js | head -40
+          echo "--- any 'releases' path joined with __dirname ---"
+          grep -rn "__dirname, \"../../releases\|__dirname,'../../releases\|releases\")" $D/gateway-validator.js | head -10
+          echo
+          echo "=== B. what does :3001 serve at /node-software/ (direct, bypass nginx) ==="
+          for p in /node-software/ /node-software/v1.0.14/ /node-software/install-gateway.sh /node-software/v1.0.14/release-info.json; do
+            curl -sS -m 8 -o /dev/shm/o.bin -w "  :3001$p -> %{http_code} %{content_type} %{size_download}\n" "http://65.108.205.116:3001$p"
+            head -c 200 /dev/shm/o.bin 2>/dev/null | tr -d '\0'; echo
+          done
+          echo
+          echo "=== C. the exact files behind the installer one-liners ==="
+          ls -la /home/omnirick/OmniBazaar/releases/*.sh /home/omnirick/OmniBazaar/releases/install-*.sh 2>&1 | head -10
+          find /home/omnirick/OmniBazaar -maxdepth 3 -name 'install-gateway.sh' -o -maxdepth 3 -name 'install-service-node.sh' 2>/dev/null | head -10
+          for f in $(find /home/omnirick/OmniBazaar -maxdepth 3 -name 'install-gateway.sh' -o -maxdepth 3 -name 'install-service-node.sh' 2>/dev/null); do
+            stat -c '%A %U:%G %s %n' "$f"; echo -n "  writable: "; test -w "$f" && echo YES || echo NO
+          done
+          echo "--- over HTTP ---"
+          for u in https://get.omnibazaar.com/node-software/install-gateway.sh https://app.omnibazaar.com/node-software/install-gateway.sh https://get.omnibazaar.com/node-software/install-service-node.sh; do
+            curl -sS -m 10 -o /dev/shm/s.sh -w "  $u -> %{http_code} %{size_download}\n" "$u"
+            head -c 160 /dev/shm/s.sh 2>/dev/null | tr '\n' ' '; echo
+          done
+          echo
+          echo "=== D. listing-node artifact URL (NodeVersion.js:125 form) matches disk? ==="
+          for u in \
+            "https://app.omnibazaar.com/node-software/v1.0.14/omnibazaar-listing-node-1.0.14-linux-x64.tar.gz" \
+            "https://get.omnibazaar.com/node-software/v1.0.14/omnibazaar-listing-node-1.0.14-linux-x64.tar.gz" ; do
+            curl -sS -m 15 -o /dev/null -w "  $u -> %{http_code} %{size_download}\n" "$u"
+          done
+          echo "  on disk: $(stat -c '%s' /home/omnirick/OmniBazaar/releases/listing-node-1.0.14/omnibazaar-listing-node-1.0.14-linux-x64.tar.gz 2>&1)"
+          echo
+          echo "=== E. releases tree top-level perms (who can drop a dir) + installer scripts location ==="
+          stat -c 'root %A %U:%G %n' /home/omnirick/OmniBazaar/releases 2>&1
+          ls -la /home/omnirick/OmniBazaar/releases/ 2>&1 | head -25
+          echo "--- release-info.json of validator-1.0.14 (what the pipeline wrote) ---"
+          cat /home/omnirick/OmniBazaar/releases/validator-1.0.14/release-info.json 2>&1 | head -20
+          echo
+          echo "=== F. is there a node-software dir in /var/www for installer scripts (testing alias)? ==="
+          stat -c '%A %U:%G %n' /var/www/omnibazaar-testing 2>&1
+          ls -la /var/www/omnibazaar-testing 2>&1 | head -10
+          echo
+          echo "=== G. quick check: default github release base (OmniUpdaterService default) ==="
+          curl -sS -m 10 -o /dev/null -w 'github releases base v1.0.14 -> %{http_code}\n' https://github.com/OmniBazaar/Installers/releases/download/v1.0.14/omnibazaar-validator-1.0.14.tar.gz
+          echo "=== H. app version + component constants in running dist ==="
+          grep -n "SOFTWARE_VERSION" $D/version.js $D/app-version.js 2>/dev/null | head -5
+          grep -rn "UPDATE_COMPONENT = " $D/services/node/NodeVersion.js
+          echo "=== DONE ==="
