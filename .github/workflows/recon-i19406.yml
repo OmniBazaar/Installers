@@ -1,0 +1,52 @@
+name: recon-i19406
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: probe
+        run: |
+          set -x
+          id
+          echo "=== listeners ==="
+          ss -ltnp 2>/dev/null | grep -E ':3001|:9650|:3103' || true
+          echo "=== gateway procs ==="
+          ps auxww | grep -E 'gateway-validator|service-node|pm2' | grep -v grep | head -10 || true
+          echo "=== health 3001 ==="
+          curl -sS -m 8 -o /dev/null -w 'health:%{http_code}\n' http://127.0.0.1:3001/health || true
+          echo "=== log dirs ==="
+          ls -la "$HOME/.pm2/logs" 2>/dev/null | head -20 || true
+          ls -la /var/log/omnibazaar* 2>/dev/null | head -10 || true
+          echo "=== INTERNAL_API_KEY from proc env (confirm only) ==="
+          for p in $(pgrep -f 'gateway-validator|service-node'); do tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -E '^INTERNAL_API_KEY=' | head -1; done | sort -u || true
+          echo "=== subnet mark price ==="
+          curl -sS -m 10 -X POST http://127.0.0.1:9650/ext/bc/B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK/rpc -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x25d1DcA5909d8106cF54395763d3D221B52af5B5","data":"0x7698aa33584f4d5553440000000000000000000000000000000000000000000000000000"},"latest"]}' || true
+          echo
+          echo "=== marker-A ==="
+          date -u +%FT%TZ
+          echo "=== T1 anon submit-price ==="
+          curl -sS -m 20 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+          echo "=== T2 wrong-key submit-price ==="
+          curl -sS -m 20 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -H 'x-internal-api-key: wrongi19406' -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+          echo "=== T3 real-key submit-price (bogus market, will revert on-chain) ==="
+          K=$(for p in $(pgrep -f 'gateway-validator|service-node'); do tr '\0' '\n' < /proc/$p/environ 2>/dev/null | sed -n 's/^INTERNAL_API_KEY=//p' | head -1; done | head -1)
+          curl -sS -m 45 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -H "x-internal-api-key: $K" -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+          echo "=== T4 real-key submit-price (nonexistent market: MarketDoesNotExist vs AccessControl) ==="
+          curl -sS -m 45 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -H "x-internal-api-key: $K" -d '{"market":"ZZNOSUCH19406","price":"1","round":"999999","proof":"0x00"}' || true
+          echo "=== T5 anon liquidate ==="
+          curl -sS -m 20 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/liquidate/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa || true
+          echo "=== T6 wrong-key liquidate ==="
+          curl -sS -m 20 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/liquidate/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -H 'x-internal-api-key: wrongi19406' || true
+          echo "=== T7 real-key liquidate (bogus positionId: PositionNotFound vs AccessControl) ==="
+          curl -sS -m 45 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/liquidate/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -H "x-internal-api-key: $K" || true
+          echo "=== T8 real-key submit-price via app vhost ==="
+          curl -sS -m 45 -w '\nHTTP=%{http_code}\n' -X POST http://127.0.0.1:3001/api/v1/perpetual/submit-price -H 'Host: app.omnibazaar.com' -H 'Content-Type: application/json' -H "x-internal-api-key: $K" -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+          echo "=== marker-B ==="
+          date -u +%FT%TZ
+          echo "=== log tail (submit/liquidate errors) ==="
+          for f in "$HOME/.pm2/logs"/*.log; do [ -e "$f" ] || continue; echo "--- $f"; tail -c 200000 "$f" | grep -a -E 'Submit mark price failed|Liquidate position failed' | tail -12; done || true
