@@ -1,0 +1,46 @@
+name: recon-19398b
+# temp read-only recon part 2: confirm the shipped ValidatorStorageAPI routes are NOT mounted on the
+# real production gateway (:3001 / vhosts), and that no container/process serves 31xx.
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  confirm:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: confirm-not-mounted
+        run: |
+          set -x
+          echo "##GATEWAY_3001_THREESTATE"
+          for P in /api/storage/listings /api/validator/trust-score/bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku /api/cross-service/content /api/cross-service/references /api/stats/metrics /api/search/listings /health; do
+            printf 'NOAUTH %s ' "$P"
+            curl -sS -m 5 -o /tmp/c.b -w 'code=%{http_code} size=%{size_download}\n' "http://127.0.0.1:3001$P" 2>&1 | tail -1
+            head -c 120 /tmp/c.b 2>/dev/null; echo
+            printf 'HDR %s ' "$P"
+            curl -sS -m 5 -H 'x-validator-signature: AAAA-garbage-19398' -o /tmp/c.b -w 'code=%{http_code} size=%{size_download}\n' "http://127.0.0.1:3001$P" 2>&1 | tail -1
+            head -c 120 /tmp/c.b 2>/dev/null; echo
+          done
+          echo "##SAME_VIA_VIP_AND_VHOST"
+          for U in "http://65.108.205.116:3001/api/storage/listings" "https://app.omnibazaar.com/api/storage/listings" "https://admin.omnibazaar.com/api/validator/trust-score/x" "https://api.omnibazaar.com/api/cross-service/content"; do
+            printf 'GET %s ' "$U"
+            curl -sS -m 6 -o /tmp/d.b -w 'code=%{http_code} size=%{size_download}\n' "$U" 2>&1 | tail -1
+            head -c 120 /tmp/d.b 2>/dev/null; echo
+          done
+          echo "##DOCKER_PORTS"
+          sudo -n docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | head -40
+          echo "##DOCKER_GREP_STORAGE"
+          sudo -n docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' 2>/dev/null | grep -iE 'storage|validator|gateway' | head -20
+          echo "##PROC_31xx"
+          sudo -n ss -ltnp 2>/dev/null | grep -E ':31[0-9][0-9]' || echo "NO-31XX-ANY"
+          echo "##NGINX_STORAGE_UPSTREAM"
+          sudo -n grep -rn "storage\|3103\|3199" /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -20 || echo "none"
+          echo "##DIST_REQUIRE_STORAGESERVER"
+          grep -rn "services/storage/StorageServer" /home/omnirick/OmniBazaar/Validator/dist --include=*.js 2>/dev/null | grep -v "^.*services/storage/" | head -10 || echo "NO-REQUIRE-OUTSIDE-MODULE"
+          echo "##ENTRYPOINTS"
+          sudo -n systemctl cat omnicoin-validator-1.service 2>/dev/null | head -25
+          echo "##SERVICE_CMD"
+          sudo -n systemctl show omnicoin-validator-1.service -p ExecStart 2>/dev/null | head -5
+          echo "##DONE"
