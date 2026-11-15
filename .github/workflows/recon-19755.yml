@@ -1,0 +1,96 @@
+name: recon-19755
+on:
+  push:
+    branches: ["recon-19755-*"]
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 20
+    steps:
+      - name: readonly audit service-node 1.1.0 + verifier
+        shell: bash
+        run: |
+          set +e
+          W=$(mktemp -d /tmp/i19755.XXXXXX)
+          echo "WORKDIR=$W"
+          R=/home/omnirick/OmniBazaar/releases
+          echo "##A-hosts"
+          id; hostname
+          echo
+          echo "##B-target-files"
+          ls -la "$R/service-node-1.1.0" "$R/service-node-1.0.14" "$R/validator-1.0.14" 2>&1
+          echo
+          echo "##C-sha256-of-all-artifacts"
+          for f in "$R/service-node-1.1.0/omnibazaar-service-node-1.1.0.tar.gz" \
+                   "$R/service-node-1.0.14/omnibazaar-service-node-1.0.14.tar.gz" \
+                   "$R/service-node-1.0.14/omnibazaar-verifier-1.0.14.tar.gz" \
+                   "$R/validator-1.0.14/omnibazaar-verifier-1.0.14.tar.gz" \
+                   "$R/validator-1.0.14/omnibazaar-validator-1.0.14.tar.gz"; do
+            if [ -f "$f" ]; then echo "$(sha256sum "$f")"; else echo "MISSING $f"; fi
+          done
+          echo
+          echo "##D-1.1.0-tree"
+          tar tzf "$R/service-node-1.1.0/omnibazaar-service-node-1.1.0.tar.gz" 2>&1 | head -60
+          echo "--- filecount:"; tar tzf "$R/service-node-1.1.0/omnibazaar-service-node-1.1.0.tar.gz" 2>/dev/null | wc -l
+          echo
+          echo "##E-extract-1.1.0"
+          mkdir -p "$W/a110"
+          tar xzf "$R/service-node-1.1.0/omnibazaar-service-node-1.1.0.tar.gz" -C "$W/a110" 2>&1 | head -5
+          echo "--- top level:"; ls -la "$W/a110" 2>&1 | head -20
+          echo "--- package.json candidates:"; find "$W/a110" -maxdepth 3 -name package.json -printf '%p\n' 2>/dev/null | head -10
+          for p in $(find "$W/a110" -maxdepth 3 -name package.json 2>/dev/null | head -6); do echo "=== $p"; head -c 400 "$p"; echo; done
+          echo
+          echo "##F-js-file-inventory"
+          find "$W/a110" -type f -name '*.js' -printf '%10s %p\n' 2>/dev/null | sort -rn | head -25
+          echo "--- total js:"; find "$W/a110" -type f -name '*.js' 2>/dev/null | wc -l
+          echo
+          echo "##G-routes-1.1.0"
+          grep -rhoE 'app\.(get|post|put|patch|delete|all|use)\(("[^"]+"|'"'"'[^'"'"']+'"'"')' "$W/a110" --include='*.js' 2>/dev/null | sed -E 's/app\.//; s/\(["'"'"']/\t/; s/["'"'"']$//' | sort -u > "$W/routes110.txt"
+          echo "route_count=$(wc -l < "$W/routes110.txt")"
+          echo "--- internal/admin/priv/mem/debug/agent routes:"
+          grep -iE 'internal|admin|priv|/mem|debug|agent|secret|token|key' "$W/routes110.txt" | head -80
+          echo
+          echo "##H-env-vars-1.1.0"
+          grep -rhoE 'process\.env\.[A-Za-z0-9_]+' "$W/a110" --include='*.js' 2>/dev/null | sed 's/process\.env\.//' | sort -u > "$W/env110.txt"
+          echo "env_count=$(wc -l < "$W/env110.txt")"
+          cat "$W/env110.txt" | head -200
+          echo
+          echo "##I-secret-literals"
+          echo "--- 64-hex constants:"; grep -rhoE '0x[a-fA-F0-9]{64}' "$W/a110" --include='*.js' 2>/dev/null | sort -u | head -20
+          echo "--- PRIVATE_KEY / PK / mnemonic lines:"; grep -rnE '(PRIVATE_KEY[^A-Za-z_]|_PK[ =:"'"'"']|mnemonic|seedPhrase)' "$W/a110" --include='*.js' 2>/dev/null | head -25 | cut -c1-220
+          echo "--- hardcoded password-ish:"; grep -rnoE '(password|passwd|secret)[A-Za-z_]*[ =:]+["'"'"'][^"'"'"']{4,60}["'"'"']' "$W/a110" --include='*.js' 2>/dev/null | head -25 | cut -c1-200
+          echo
+          echo "##J-address-as-identity"
+          grep -rnE '=== *["'"'"']0x[a-fA-F0-9]{40}["'"'"']|!== *["'"'"']0x[a-fA-F0-9]{40}["'"'"']' "$W/a110" --include='*.js' 2>/dev/null | head -20 | cut -c1-240
+          echo "--- TODO/FIXME/allow-all auth notes:"; grep -rniE 'allow all|no auth|skip auth|for now|TODO.*(auth|signature)' "$W/a110" --include='*.js' 2>/dev/null | head -20 | cut -c1-200
+          echo
+          echo "##K-verifier-1.0.14-service-node"
+          mkdir -p "$W/sn14"
+          tar xzf "$R/service-node-1.0.14/omnibazaar-verifier-1.0.14.tar.gz" -C "$W/sn14" 2>&1 | head -3
+          find "$W/sn14" -type f -printf '%10s %p\n' 2>/dev/null; sha256sum "$W/sn14"/*/* 2>/dev/null
+          echo "--- same as validator-side verifier?"; sha256sum "$R/validator-1.0.14/omnibazaar-verifier-1.0.14.tar.gz" "$R/service-node-1.0.14/omnibazaar-verifier-1.0.14.tar.gz"
+          echo
+          echo "##L-diff-routes-1.0.14-vs-1.1.0"
+          mkdir -p "$W/a14"
+          tar xzf "$R/service-node-1.0.14/omnibazaar-service-node-1.0.14.tar.gz" -C "$W/a14" 2>&1 | head -3
+          grep -rhoE 'app\.(get|post|put|patch|delete|all|use)\(("[^"]+"|'"'"'[^'"'"']+'"'"')' "$W/a14" --include='*.js' 2>/dev/null | sed -E 's/app\.//; s/\(["'"'"']/\t/; s/["'"'"']$//' | sort -u > "$W/routes14.txt"
+          echo "routes14_count=$(wc -l < "$W/routes14.txt")"
+          echo "--- only in 1.1.0:"; comm -13 "$W/routes14.txt" "$W/routes110.txt" | head -120
+          echo "--- only in 1.0.14 (count):"; comm -23 "$W/routes14.txt" "$W/routes110.txt" | wc -l
+          grep -rhoE 'process\.env\.[A-Za-z0-9_]+' "$W/a14" --include='*.js' 2>/dev/null | sed 's/process\.env\.//' | sort -u > "$W/env14.txt"
+          echo "--- env only in 1.1.0:"; comm -13 "$W/env14.txt" "$W/env110.txt" | head -80
+          echo "--- env only in 1.0.14:"; comm -23 "$W/env14.txt" "$W/env110.txt" | head -80
+          echo
+          echo "##M-cleanup"
+          find "$W" -mindepth 1 -delete 2>/dev/null
+          echo "##DONE"
+      - name: cleanup branch
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo cleanup-failed
