@@ -1,0 +1,26 @@
+name: recon-i19558
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: locate agent.omnibazaar.com service (read-only)
+        run: |
+          echo "=== A. nginx server_name hits for agent ==="
+          sudo -n grep -rln "agent" /etc/nginx/ 2>/dev/null | head -20
+          echo "--- vhost blocks mentioning agent.*omnibazaar ---"
+          sudo -n grep -rn "agent\.omnibazaar\|server_name" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | grep -v "^\s*#" | head -80
+          echo "=== B. listeners ==="
+          (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | head -40
+          echo "=== C. processes with agent in name ==="
+          ps -eo pid,user,etimes,args 2>/dev/null | grep -iE "agent" | grep -v grep | head -20
+          echo "=== D. dirs named *agent* (depth<=3 under /home/omnirick) ==="
+          sudo -n find /home/omnirick -maxdepth 3 -iname "*agent*" 2>/dev/null | head -40
+          echo "=== E. cert files for agent ==="
+          sudo -n grep -rn "agent.omnibazaar" /etc/nginx /etc/letsencrypt/renewal 2>/dev/null | head -20
+          echo "=== done ==="
