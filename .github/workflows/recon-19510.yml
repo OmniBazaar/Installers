@@ -1,0 +1,165 @@
+name: recon-19510
+# temp read-only recon: enumerate the official distribution APKs on the host and
+# extract their signing-certificate DER. Read-only (ls/find/sha256sum/cat/keytool -list).
+# No signing of real apps, no modification of distribution files, no uploads.
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  apkident:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 12
+    steps:
+      - name: A-locate-distribution-dirs
+        run: |
+          set +e
+          echo "##WHO"; hostname; id; date -u
+          echo "##TOOLS"; for t in python3 node keytool java openssl apksigner sha256sum; do printf '%s=' "$t"; command -v $t || echo MISSING; done
+          echo "##VALIDATOR_MOBILE_DIST"
+          ls -la /home/omnirick/OmniBazaar/Mobile/dist 2>&1 | head -40
+          echo "##MOBILE_DIST_ALT"
+          ls -la /home/omnirick/OmniBazaar/Mobile 2>&1 | head -30
+          echo "##WALLET_DIST"
+          ls -la /home/omnirick/OmniBazaar/Wallet/dist 2>&1 | head -20
+          echo "##RELEASES_MANIFEST_PATH"
+          ls -la /home/omnirick/OmniBazaar/releases/manifest.json 2>&1
+          echo "##RELEASES_MANIFEST_BODY"
+          head -c 4000 /home/omnirick/OmniBazaar/releases/manifest.json 2>&1
+          echo
+          echo "##NGINX_DOWNLOAD_VHOST"
+          grep -nE 'server_name|location|root |alias |proxy_pass|listen ' /etc/nginx/sites-available/download-omnibazaar.conf 2>&1 | head -40
+          echo "##NGINX_APP_MOBILE"
+          grep -nE 'mobile' /etc/nginx/sites-available/app-omnibazaar.conf 2>&1 | head -20
+          echo "##FIND_APK_ALL"
+          find /home/omnirick /var/www /tmp/opencode -maxdepth 6 \( -name '*.apk' -o -name '*.aab' -o -name '*.ipa' \) -printf '%s %TY-%Tm-%Td %p\n' 2>/dev/null | sort -k3 | head -60
+          echo "##FIND_APK_DEEPER"
+          find / -xdev -name '*.apk' -printf '%s %p\n' 2>/dev/null | head -40
+          echo "##KEYSTORES"
+          find /home/omnirick -maxdepth 6 -name '*.keystore' -printf '%s %TY-%Tm-%Td %p\n' 2>/dev/null | head -20
+          echo "##DONE_A"
+
+      - name: B-cert-der-extraction
+        run: |
+          set +e
+          cat > /tmp/sig19510.js <<'JSEOF'
+          const fs=require('fs'), crypto=require('crypto'), path=require('path');
+          const EOCD=Buffer.from([0x50,0x4b,0x05,0x06]);
+          const MAGIC=Buffer.from('APK Sig Block 42','ascii');
+          function lp(b,o){ const n=b.readUInt32LE(o); return [b.subarray(o+4,o+4+n), o+4+n]; }
+          function sha(b){ return crypto.createHash('sha256').update(b).digest('hex'); }
+          function colon(h){ return h.toUpperCase().match(/../g).join(':'); }
+          function extract(p){
+            let d; try { d=fs.readFileSync(p); } catch(e){ console.log('READ_FAIL '+p+' '+e.message); return; }
+            const eo=d.lastIndexOf(EOCD);
+            if(eo<0){ console.log('NO_EOCD '+p); return; }
+            const cdoff=d.readUInt32LE(eo+16);
+            const mp=cdoff-16;
+            if(mp<0 || d.subarray(mp,mp+16).toString('ascii')!=='APK Sig Block 42'){ console.log('NO_SIGBLOCK '+p+' cdoff='+cdoff); return; }
+            const size=Number(d.readBigUInt64LE(mp-8));
+            let off=cdoff-(size+8)+8;
+            const end=mp-8;
+            const pairs=[];
+            while(off<end){
+              const plen=Number(d.readBigUInt64LE(off));
+              const pid=d.readUInt32LE(off+8);
+              const val=d.subarray(off+12, off+8+plen);
+              pairs.push([pid,val]);
+              off+=8+plen;
+            }
+            console.log('FILE '+p+' size='+d.length+' sha256='+sha(d));
+            console.log('  pairs: '+pairs.map(x=>'0x'+x[0].toString(16)).join(','));
+            for(const [pid,val] of pairs){
+              let label=null;
+              if(pid===0x7109871a) label='v2';
+              else if(pid===0xf05368c0) label='v3';
+              else if(pid===0x1b93ad61) label='v31';
+              if(!label){ // print unknown small blocks briefly
+                if(val.length<400) console.log('  unknown 0x'+pid.toString(16)+' len='+val.length+' hex='+val.toString('hex').slice(0,200));
+                else console.log('  unknown 0x'+pid.toString(16)+' len='+val.length);
+                continue;
+              }
+              let signers;
+              try { [signers]=lp(val,0); } catch(e){ console.log('  '+label+' lp fail '+e.message); continue; }
+              let o=0, idx=0;
+              while(o<signers.length){
+                let signer; [signer,o]=lp(signers,o);
+                let sd;
+                try { [sd]=lp(signer,0); } catch(e){ console.log('  signer lp fail '+e.message); break; }
+                let dig, certs;
+                try { [dig]=lp(sd,0); [certs]=lp(sd,dig?0:0); } catch(e){}
+                // proper: read digests lp then certificates lp
+                try {
+                  let o2=0; let digests; [digests,o2]=lp(sd,o2); [certs]=lp(sd,o2);
+                } catch(e){ console.log('  sd parse fail '+e.message); break; }
+                let o4=0,i2=0;
+                while(o4<certs.length){
+                  let c; [c,o4]=lp(certs,o4);
+                  const h=sha(c);
+                  console.log('  CERT '+label+' signer'+idx+' cert'+i2+' len='+c.length+' sha256='+h);
+                  console.log('     colon='+colon(h));
+                  console.log('     b64='+c.toString('base64'));
+                  i2++;
+                }
+                idx++;
+              }
+            }
+          }
+          const files=process.argv.slice(2);
+          for(const f of files) extract(f);
+          JSEOF
+          FILES=$(find /home/omnirick /tmp/opencode -maxdepth 6 \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null | sort)
+          echo "##CANDIDATES"; echo "$FILES"
+          echo "##EXTRACT"
+          node /tmp/sig19510.js $FILES 2>&1 | head -200
+          echo "##DONE_B"
+
+      - name: C-keystore-list-readonly
+        run: |
+          set +e
+          echo "##KEYTOOL_FIND"
+          KS=$(find /home/omnirick -maxdepth 6 -name 'omnibazaar-release.keystore' 2>/dev/null | head -5)
+          echo "$KS"
+          for k in $KS; do
+            echo "=== $k ==="
+            ls -la "$k"
+            sha256sum "$k"
+            keytool -list -v -keystore "$k" -storepass theta8008 2>&1 | head -60
+            echo "--- keytool exit=$? ---"
+          done
+          echo "##ALSO_PLAY_UPLOAD_COPY"
+          keytool -list -v -keystore /home/omnirick/.omnibazaar-keys/android-release-play-upload.keystore -storepass theta8008 2>&1 | head -60
+          echo "##DONE_C"
+
+      - name: D-network-path-and-runbook-crosscheck
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19510'
+          echo "##LOCAL_3001_MOBILE_DIRLIST"
+          curl -sS -m 6 -A "$UA" -o /tmp/m1 -w 'code=%{http_code} size=%{size_download}\n' http://65.108.205.116:3001/mobile/
+          head -c 400 /tmp/m1; echo
+          echo "##MANIFEST_VIA_3001"
+          curl -sS -m 6 -A "$UA" -o /tmp/mf.json -w 'code=%{http_code} size=%{size_download}\n' http://65.108.205.116:3001/api/v1/builds/manifest
+          head -c 1500 /tmp/mf.json; echo
+          echo "##DOWNLOAD_VHOST_PROBE"
+          for u in https://download.omnibazaar.com/ https://download.omnibazaar.com/mobile/ https://app.omnibazaar.com/mobile/ https://app.omnibazaar.com/mobile/install; do
+            printf '%-52s ' "$u"
+            curl -sS -m 8 -A "$UA" -o /dev/null -w 'code=%{http_code} type=%{content_type} size=%{size_download}\n' "$u" 2>&1 | tail -1
+          done
+          echo "##APK_HTTP_HEADERS"
+          curl -sS -m 10 -A "$UA" -D - -o /dev/null https://app.omnibazaar.com/mobile/OmniBazaar-v0.9.5.apk 2>&1 | head -12
+          echo "##RUNBOOK_GREP"
+          grep -n "DC:E7:D3\|SHA256\|fingerprint" /home/omnirick/OmniBazaar/Mobile/docs/PLAY_SUBMISSION_RUNBOOK.md 2>&1 | head -20
+          echo "##APP_ASSETLINKS"
+          curl -sS -m 8 -A "$UA" -o /tmp/al.json -w 'code=%{http_code}\n' https://app.omnibazaar.com/.well-known/assetlinks.json
+          head -c 600 /tmp/al.json; echo
+          echo "##DONE_D"
+
+      - name: cleanup-temp-branch
+        if: always()
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
