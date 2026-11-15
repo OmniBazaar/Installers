@@ -375,12 +375,18 @@ function verifySignature(file) {
   // Windows, and the release build runs on Linux and macOS too (either via a Windows
   // runner or a cloud signer such as Certum SimplySign + ssign).
   const pe = file.endsWith(".exe") || file.endsWith(".dll");
-  const argv = pe && process.platform === "win32"
+  const win = pe && process.platform === "win32";
+  // `osslsigncode` needs the issuing root to build the chain, and a second store for the
+  // timestamp authority. Without them it reports "Signature verification: ok" but
+  // "Timestamp Server Signature verification: failed" — a half-checked signature. The
+  // bundle is the platform CA store; OBZ_SIGN_CAFILE overrides it for a host without one.
+  const caBundle = process.env.OBZ_SIGN_CAFILE
+    ?? ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem"]
+      .find((p) => existsSync(p));
+  const argv = win
     ? ["verify", "/pa", "/v", file]
-    : ["verify", "-in", file];
-  const command = pe && process.platform === "win32"
-    ? (process.env.OBZ_SIGNTOOL ?? "signtool")
-    : "osslsigncode";
+    : ["verify", "-in", file, ...(caBundle === undefined ? [] : ["-CAfile", caBundle, "-TSA-CAfile", caBundle])];
+  const command = win ? (process.env.OBZ_SIGNTOOL ?? "signtool") : "osslsigncode";
   try {
     execFileSync(command, argv, { stdio: "inherit" });
   } catch {
