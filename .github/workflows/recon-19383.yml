@@ -1,0 +1,83 @@
+name: recon-19383
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: read-only updater config probe
+        run: |
+          echo "=== whoami/host ==="
+          id; hostname
+          echo
+          echo "=== unit files on disk ==="
+          ls -la /etc/systemd/system/ | grep -i omnicoin || true
+          echo "--- drop-in dirs ---"
+          ls -la /etc/systemd/system/omnicoin-validator*.service.d/ 2>&1 || true
+          echo
+          echo "=== systemctl list-unit-files (omnicoin) ==="
+          systemctl list-unit-files 'omnicoin*' --no-pager 2>&1 | head -20
+          echo
+          echo "=== systemctl show properties (all omnicoin-validator units) ==="
+          for u in $(systemctl list-unit-files 'omnicoin*' --no-pager --plain 2>/dev/null | awk '{print $1}'); do
+            echo "--- UNIT: $u ---"
+            systemctl show "$u" -p Id -p LoadState -p ActiveState -p SubState -p FragmentPath -p DropInPaths -p WorkingDirectory -p ExecStart -p EnvironmentFiles -p User -p Restart 2>&1 | sed 's/^/  /'
+            echo "  --- Environment (filtered) ---"
+            systemctl show "$u" -p Environment 2>&1 | tr ' ' '\n' | grep -E '^(Environment=)?(OBZ_|GATEWAY_|PORT=|WS_PORT=|P2P_PORT=|UNIFIED_PORT=)' | sed 's/^/  /' || true
+          done
+          echo
+          echo "=== unit file text: OBZ / EnvironmentFile lines only ==="
+          for f in /etc/systemd/system/omnicoin-*.service; do
+            echo "--- $f ---"
+            stat -c '%A %U:%G %n' "$f" 2>&1
+            grep -nE 'OBZ_|EnvironmentFile|Environment=|ExecStart|WorkingDirectory|User=' "$f" 2>&1 | sed 's/^/  /'
+          done
+          echo
+          echo "=== config dir incl. EnvironmentFile contents (filtered) ==="
+          ls -la /etc/omnicoin-validator/ /etc/omnicoin/ 2>&1 | head -40
+          for f in /etc/omnicoin-validator/environment /etc/omnicoin-validator/wallet.env /etc/omnicoin-validator/gateway.env; do
+            echo "--- $f ---"
+            stat -c '%A %U:%G %s %n' "$f" 2>&1
+            grep -nE '^(OBZ_|GATEWAY_)' "$f" 2>&1 | sed -E 's/(TOKEN|SECRET|PASSWORD|KEY|PRIVATE)=.*/\1=<redacted>/' | sed 's/^/  /' || true
+          done
+          echo
+          echo "=== running validator processes ==="
+          ps -eo pid,user,etime,args --no-headers | grep -E 'gateway-validator\.js' | grep -v grep | cut -c1-220
+          echo
+          echo "=== per-pid filtered environ (OBZ_/GATEWAY_) ==="
+          for p in $(pgrep -f 'gateway-validator.js' 2>/dev/null); do
+            echo "--- pid=$p uid=$(stat -c %U /proc/$p 2>/dev/null) ---"
+            timeout 20 tr '\0' '\n' < /proc/$p/environ 2>&1 | grep -E '^(OBZ_|GATEWAY_URL|GATEWAY_DNS|NODE_ID|PORT=)' 2>&1 | sed -E 's/(ADMIN_TOKEN)=.*/\1=<len:REDACTED>/' | sed 's/^/  /' || echo "  (read failed rc=$?)"
+          done
+          echo
+          echo "=== release layout ==="
+          for d in /opt/omnicoin-validator /opt/omnicoin-service-node; do
+            echo "--- $d ---"
+            ls -la "$d" 2>&1 | head -12
+            echo "  releases:"; ls -la "$d/releases" 2>&1 | head -10
+            echo "  current ->"; readlink -f "$d/current" 2>&1
+          done
+          echo
+          echo "=== live /health (version + update fields) ==="
+          for port in 3001; do
+            curl -sS -m 8 "http://127.0.0.1:$port/health" 2>&1 | head -c 1200; echo
+          done
+          echo
+          echo "=== updates status endpoint (read-only) ==="
+          curl -sS -m 8 "http://127.0.0.1:3001/api/v1/updates/status" 2>&1 | head -c 800; echo
+          echo
+          echo "=== node-software static dir (where artifacts are served) ==="
+          grep -rn "node-software" /etc/nginx/ 2>/dev/null | head -20
+          echo "--- candidate dirs perms ---"
+          for d in /var/www/node-software /var/www/html/node-software /opt/omnicoin-validator/node-software /home/omnirick/OmniBazaar/Validator/node-software; do
+            stat -c '%A %U:%G %U:%G %n' "$d" 2>&1
+          done
+          find / -maxdepth 6 -type d -name 'node-software' 2>/dev/null | head -10
+          echo
+          echo "=== git remotes / Installers releases dir on host (read-only) ==="
+          ls -la /home/omnirick/OmniBazaar/Validator/releases 2>&1 | head -10
+          readlink -f /home/omnirick/OmniBazaar/Validator/current 2>&1
