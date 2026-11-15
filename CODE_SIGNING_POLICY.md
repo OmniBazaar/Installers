@@ -39,13 +39,14 @@ raise an "Unknown publisher" prompt.
 
 1. A tag on `OmniBazaar/Installers` (`listing-node-v<version>`) runs
    `.github/workflows/listing-node-windows.yml`.
-2. The job declares the `signing` GitHub Environment. Its required-reviewer rule is the
+2. The job declares the `signing` GitHub Environment, whose required-reviewer rule is the
    approval step: the certificate credentials are not readable until a team member
-   approves the run. 🛑 **Not in force as of 2026-11-15:** GitHub only offers environment
-   protection rules on private repositories with a paid plan, and this organisation is on
-   Free, so the environment currently exists without a rule. The credentials are therefore
-   not stored until that is resolved (make this repository public, which the policy's own
-   "build from reviewable source" claim already assumes, or upgrade the plan).
+   approves the run. The rule is in force as of 2026-11-15: this repository is public (it
+   is MIT, and "build from reviewable source" means the source is readable), the
+   `signing` environment carries `required_reviewers`, and administrator bypass is
+   switched off, so nobody — including an owner — can skip the click. Self-review is
+   allowed while there is one reviewer; it must be turned off when the second approver is
+   added.
 3. The workflow builds from **reviewable source only** (the build script and workflow are in this repository). Its third-party inputs
    are pinned by URL **and** SHA-256: Node.js 20.18.0 and the PostgreSQL 16.4 Windows
    binaries in [`listing-node-windows/tools.lock.json`](listing-node-windows/tools.lock.json),
