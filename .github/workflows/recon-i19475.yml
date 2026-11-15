@@ -1,0 +1,62 @@
+name: recon-i19475
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: read-only entrypoint + revenue + explorer probe
+        run: |
+          echo "=== 1. who serves :3001 (process cmdline) ==="
+          ps -eo pid,user,etimes,args | grep -E "node .*dist/(gateway-validator|service-node)\.js" | grep -v grep | head -12
+          echo "=== 1b. listeners on 3001 ==="
+          (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E ":3001|:8080|:443 " | head -10
+          echo "=== 1c. systemd units ExecStart ==="
+          for u in omnicoin-validator omnicoin-validator-1 omnicoin-validator-2 omnicoin-validator-3 omnicoin-validator-4 omnicoin-validator-5; do
+            printf '%s -> ' "$u"
+            systemctl show -p ExecStart --value "$u" 2>/dev/null | tr -d '\n' | head -c 220
+            echo
+          done
+          echo "=== 1d. nginx vhost -> upstream (read-only) ==="
+          sudo -n grep -rnE "server_name|proxy_pass|upstream |listen " /etc/nginx/sites-enabled/ 2>/dev/null | grep -vE "^\s*#" | head -60
+          echo "=== 2. derive INTERNAL_API_KEY from local process env (no secret written) ==="
+          KPID=$(pgrep -f "dist/gateway-validator.js" | head -1)
+          echo "gateway pid=$KPID"
+          KEY=$(sudo -n tr '\0' '\n' < /proc/$KPID/environ 2>/dev/null | sed -n 's/^INTERNAL_API_KEY=//p')
+          echo "key_len=${#KEY}"
+          echo "=== 3. revenue three-state (anon / wrongkey / realkey) ==="
+          for base in "http://127.0.0.1:3001" "http://65.108.205.116:3001"; do
+            for p in /api/v1/admin/revenue/summary /api/v1/admin/revenue/distribution /api/v1/admin/revenue/history; do
+              a=$(curl -sS -m 8 -o /tmp/a.out -w '%{http_code}' "$base$p"); echo "ANON  $base$p -> $a $(head -c 160 /tmp/a.out)"
+              b=$(curl -sS -m 8 -o /tmp/b.out -w '%{http_code}' -H 'x-internal-api-key: wrongkey_i19475' "$base$p"); echo "WRONG $base$p -> $b $(head -c 160 /tmp/b.out)"
+              c=$(curl -sS -m 8 -o /tmp/c.out -w '%{http_code}' -H "x-internal-api-key: $KEY" "$base$p"); echo "REAL  $base$p -> $c $(head -c 240 /tmp/c.out)"
+            done
+          done
+          echo "=== 3b. same via vhosts (TLS, pinned to 127.0.0.1) ==="
+          for h in app.omnibazaar.com admin.omnibazaar.com validator-1.omnibazaar.com validator-3.omnibazaar.com api.omnibazaar.com explorer.omnicoin.net; do
+            for p in /api/v1/admin/revenue/summary /api/v1/admin/revenue/distribution; do
+              a=$(curl -sS -m 8 --resolve "$h:443:127.0.0.1" -o /tmp/a.out -w '%{http_code}' "https://$h$p")
+              c=$(curl -sS -m 8 --resolve "$h:443:127.0.0.1" -o /tmp/c.out -w '%{http_code}' -H "x-internal-api-key: $KEY" "https://$h$p")
+              echo "$h$p  ANON=$a $(head -c 120 /tmp/a.out)  REAL=$c $(head -c 160 /tmp/c.out)"
+            done
+          done
+          echo "=== 4. explorer route inventory (status + body head + server hint) ==="
+          B=http://127.0.0.1:3001
+          probe() { code=$(curl -sS -m 8 -o /tmp/x.out -w '%{http_code}' "$@"); echo "HTTP=$code :: $* :: $(head -c 220 /tmp/x.out | tr '\n' ' ')"; }
+          for p in /api/v1/explorer/head /api/v1/explorer/stats/nav /api/v1/explorer/stats/network /api/v1/explorer/stats/marketplace /api/v1/explorer/stats/validators /api/v1/explorer/recent/blocks /api/v1/explorer/recent/transactions /api/v1/explorer/richlist /api/v1/explorer/dashboard /api/v1/explorer/labels /api/v1/explorer/health /api/v1/explorer/blocks/latest /api/v1/explorer/recent-tx /api/v1/explorer/stats /api/v1/explorer/token /api/v1/explorer/search/suggestions /api/v1/explorer/block/1 /api/v1/explorer/transaction/0x00 /api/v1/explorer/address/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0 /api/v1/explorer/address/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0/token-transfers /api/v1/explorer/verify/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0 /api/v1/explorer/contract/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0 /api/docs; do
+            probe "$B$p"
+          done
+          echo "--- POST search (controller) ---"
+          probe -X POST -H 'Content-Type: application/json' -d '{"type":"address","query":"0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0","limit":"1"}' "$B/api/v1/explorer/search"
+          echo "--- etherscan-compat /api?module= ---"
+          probe "$B/api?module=stats&action=ethsupply"
+          probe "$B/api?module=proxy&action=eth_blockNumber"
+          echo "--- main explorer router mount shadow check: /api/v1/explorer/stats vs compat ---"
+          curl -sS -m 8 -D /tmp/h1 -o /tmp/b1 "$B/api/v1/explorer/stats"; head -12 /tmp/h1; head -c 300 /tmp/b1; echo
+          echo "=== 5. /explorer EIP3091 + shadowing edge cases ==="
+          for p in /explorer/tx/0x00 /explorer/address/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0 /api/v1/explorer/token/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0 /api/v1/explorer/token/0x1c1d0a001b7fe100cf65a9935e15d89f5c02e6d0/holders; do probe "$B$p"; done
+          echo "=== done ==="
