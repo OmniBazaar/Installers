@@ -1,0 +1,86 @@
+name: recon-19510b
+# temp read-only recon (round 2): manifest mobile artifacts, which APKs the official
+# channels actually serve today, assetlinks.json, and expo OTA code-signing config.
+# Read-only only.
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  apkchan:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: A-manifest-mobile-artifacts
+        run: |
+          set +e
+          python3 - <<'PY'
+          import json
+          p='/home/omnirick/OmniBazaar/releases/manifest.json'
+          d=json.load(open(p))
+          print('updatedAt', d.get('updatedAt'))
+          for name,c in d.get('components',{}).items():
+              print('=== component', name, 'latest=', c.get('latest'))
+              for r in c.get('releases', [])[:6]:
+                  print('  release', r.get('version'), r.get('channel'), r.get('publishedAt'), 'binaryHash=', r.get('binaryHash'))
+                  for a in (r.get('artifacts') or []):
+                      print('    art', a.get('platform'), '|', a.get('file'), '|', a.get('url'), '| sha256=', a.get('sha256'), '| size=', a.get('size'))
+                  if r.get('stores'): print('    stores', r.get('stores'))
+          PY
+          echo "##DONE_A"
+      - name: B-what-official-channels-serve
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19510b'
+          for f in OmniBazaar-v1.0.15.apk OmniBazaar-v1.0.14.apk OmniBazaar-v0.9.27.apk OmniBazaar-v0.9.18.apk OmniBazaar-v0.9.5.apk OmniBazaar-v0.9.4.apk OmniBazaar-v0.9.3.apk OmniBazaar-latest.apk; do
+            for base in https://app.omnibazaar.com https://download.omnibazaar.com; do
+              printf '%-46s ' "$base/mobile/$f"
+              curl -sS -m 8 -A "$UA" -o /dev/null -w 'code=%{http_code} type=%{content_type} size=%{size_download} disp=%{header_json}\n' "$base/mobile/$f" 2>/dev/null | head -c 300; echo
+            done
+          done
+          echo "##DIRLIST_DIST"
+          ls -la /home/omnirick/OmniBazaar/Mobile/dist/ | sed -n '1,20p'
+          echo "##WEBAPP_DIST_MOBILE"
+          ls -la /home/omnirick/OmniBazaar/WebApp/dist/mobile/ 2>&1 | head -20
+          echo "##HTTP_HEAD_V1015"
+          curl -sS -m 10 -A "$UA" -I https://app.omnibazaar.com/mobile/OmniBazaar-v1.0.15.apk 2>&1 | tr -d '\r' | head -14
+          echo "##DONE_B"
+      - name: C-assetlinks-and-ota
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19510b'
+          echo "##ASSETLINKS_APP"
+          curl -sS -m 8 -A "$UA" -H 'Accept: application/json' "https://app.omnibazaar.com/.well-known/assetlinks.json" | head -c 800; echo
+          echo "##ASSETLINKS_RAW"
+          curl -sS -m 8 -A "$UA" "https://app.omnibazaar.com/.well-known/assetlinks.json" -D - -o /tmp/al2 | tr -d '\r' | head -8; head -c 800 /tmp/al2; echo
+          echo "##EXPO_UPDATES_DOC"
+          ls -la /home/omnirick/OmniBazaar/Mobile/docs/ | grep -i -E 'update|sign|ota' | head
+          echo "--- EXPO_UPDATES_CODE_SIGNING.md (head) ---"
+          head -40 /home/omnirick/OmniBazaar/Mobile/docs/EXPO_UPDATES_CODE_SIGNING.md 2>/dev/null || head -40 /opt/artex/data/tasks/74/i19222/EXPO_UPDATES_CODE_SIGNING.md 2>/dev/null
+          echo "##APPJSON_UPDATES"
+          python3 - <<'PY'
+          import json
+          for p in ['/home/omnirick/OmniBazaar/Mobile/app.json']:
+              try: d=json.load(open(p))
+              except Exception as e: print(p,'ERR',e); continue
+              ex=d.get('expo',{})
+              print('runtimeVersion', ex.get('runtimeVersion'))
+              print('updates', json.dumps(ex.get('updates'))[:800])
+              print('version', ex.get('version'))
+              print('android.package', (ex.get('android') or {}).get('package'))
+          PY
+          echo "##EAS_JSON"
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/home/omnirick/OmniBazaar/Mobile/eas.json'))
+          print(json.dumps(d)[:1200])
+          PY
+          echo "##DONE_C"
+      - name: cleanup-temp-branch
+        if: always()
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
