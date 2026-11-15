@@ -1,0 +1,59 @@
+name: recon-19621
+# temp read-only recon (branch auto-deleted at job end)
+on:
+  push:
+    branches: ["recon19621-*"]
+permissions:
+  contents: write
+jobs:
+  vm:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 15
+    steps:
+      - name: read-only L1 validator-set control plane recon
+        shell: bash
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19621'
+          SN=B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK
+          EX=http://65.108.205.116:9650
+          RPC="$EX/ext/bc/$SN/rpc"
+          q(){ # $1=label $2=path $3=method $4=params
+            printf '##%s ' "$1"
+            curl -sS -m 30 -A "$UA" -X POST "$2" -H 'Content-Type: application/json' \
+              -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$3\",\"params\":$4}" -w ' [code=%{http_code}]\n'
+          }
+          echo "##A1-positive-control-chainid"
+          q A1-subnet-chainid "$RPC" eth_chainId "[]"
+          q A1-c-chainid "$EX/ext/bc/C/rpc" eth_chainId "[]"
+          echo "##A2-chainconfig-subnet"
+          curl -sS -m 30 -A "$UA" -o /tmp/cc.json -w 'code=%{http_code} bytes=%{size_download}\n' -X POST "$RPC" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_getChainConfig","params":[]}'
+          wc -c /tmp/cc.json; gzip -c /tmp/cc.json | base64 -w0 > /tmp/cc.b64; wc -c /tmp/cc.b64; cat /tmp/cc.b64; echo
+          echo "##A3-platform-getCurrentValidators"
+          for P in "/ext/bc/P" "/ext/P" "/ext/bc/P/"; do
+            printf 'pcv %-12s ' "$P"
+            curl -sS -m 25 -A "$UA" -o /tmp/pcv.json -w 'code=%{http_code} bytes=%{size_download}\n' -X POST "$EX$P" -H 'Content-Type: application/json' \
+              -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"platform.getCurrentValidators\",\"params\":[{\"subnetID\":\"$SN\"}]}"
+            head -c 300 /tmp/pcv.json; echo
+            if [ -s /tmp/pcv.json ]; then cp /tmp/pcv.json /tmp/pcv_$$_$(echo $P|tr '/' '_').json; fi
+          done
+          echo "##A3b-full-pcv-gzip"
+          for f in /tmp/pcv_*.json; do [ -s "$f" ] || continue; echo "file=$f"; gzip -c "$f" | base64 -w0; echo; done
+          echo "##A4-getBlockchains"
+          q A4-getBlockchains "$EX/ext/bc/P" platform.getBlockchains "[]"
+          echo "##A5-code-of-candidates"
+          for A in 0x0feedc0de0000000000000000000000000000000 0xef66d84281c642AaD8341617759a69224011484e 0xd87a8673f95a2ED17e13Ade4D4F88CE73b0A439e 0x0200000000000000000000000000000000000005 0x0200000000000000000000000000000000000001; do
+            printf 'code %s ' "$A"
+            curl -sS -m 20 -A "$UA" -X POST "$RPC" -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"$A\",\"latest\"]}" -w ' [code=%{http_code}]\n' | head -c 120; echo
+          done
+          echo "##A6-methods-on-subnet-rpc"
+          q A6-modules "$RPC" rpc_modules "[]"
+          echo "##DONE"
+      - name: cleanup temp branch (self-delete)
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
