@@ -32,9 +32,23 @@ runs:
         repository: OmniBazaar/Packages
         path: packages
         token: ${{ inputs.token }}
+    - name: Checkout Coin (contract artifacts the Validator compiles against)
+      uses: actions/checkout@v4
+      with:
+        repository: OmniBazaar/Coin
+        path: Coin
+        token: ${{ inputs.token }}
     - name: Restore root workspace manifest
       shell: bash
       run: cp Installers/ci/workspace/package.json package.json
+    - name: Install Coin build dependencies
+      shell: bash
+      working-directory: Coin
+      run: npm ci --no-audit --no-fund
+    - name: Compile the contract artifacts
+      shell: bash
+      working-directory: Coin
+      run: npx hardhat compile
     - name: Workspace install (hoist deps, link @omnibazaar/* + vendored tarballs)
       shell: bash
       run: npm install
