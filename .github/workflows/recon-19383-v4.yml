@@ -1,0 +1,66 @@
+name: recon-19383-v4
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe4:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: read-only node-software static root + mandatory consumers
+        run: |
+          set +e
+          D=/home/omnirick/OmniBazaar/Validator/dist
+          echo "=== A. static route serving /node-software (whole dist) ==="
+          grep -rn "node-software" $D --include=*.js | grep -v "console/\|locales" | head -20
+          echo "--- any express.static / sendFile / releases mount ---"
+          grep -rn "express.static\|sendFile\|releases\b" $D/gateway-validator.js 2>/dev/null | head -20
+          echo "--- route defs mentioning releases/ or node-software ---"
+          grep -rn "app\.\(get\|use\)(\"/node-software\|app\.\(get\|use\)('/node-software" $D/*.js 2>/dev/null | head -10
+          echo
+          echo "=== B. what env var points the static root at releases ==="
+          grep -rn "RELEASES_ROOT\|releasesDir\|OBZ_RELEASES\|/node-software" $D/*.js $D/api/*.js $D/services/**/*.js 2>/dev/null | grep -v "OmniUpdaterService\|registerUpdater" | head -20
+          echo
+          echo "=== C. exact URL used by the trusted validator updater ==="
+          echo "  form: <base>/v<ver>/omnibazaar-<component>-<ver>.tar.gz"
+          for u in \
+            "https://app.omnibazaar.com/node-software/v1.0.14/omnibazaar-validator-1.0.14.tar.gz" \
+            "https://get.omnibazaar.com/node-software/v1.0.14/omnibazaar-validator-1.0.14.tar.gz" \
+            "https://app.omnibazaar.com/node-software/v1.0.13/omnibazaar-validator-1.0.13.tar.gz" ; do
+            curl -sS -m 15 -o /dev/null -w "  $u -> %{http_code} %{content_type} %{size_download}\n" "$u"
+          done
+          echo "--- on-disk sizes for comparison ---"
+          stat -c '%s %n' /home/omnirick/OmniBazaar/releases/validator-1.0.14/*.tar.gz /home/omnirick/OmniBazaar/releases/listing-node-1.0.14/*.tar.gz 2>&1
+          echo
+          echo "=== D. write perms of the exact target dirs (read-only stat only) ==="
+          for v in validator-1.0.14 listing-node-1.0.14; do
+            p=/home/omnirick/OmniBazaar/releases/$v
+            echo "--- $p ---"
+            stat -c 'dir %A %U:%G %n' "$p" 2>&1
+            ls -la "$p"/*.tar.gz 2>&1 | head -3
+            echo -n "  writable by current uid: "; test -w "$p" && echo YES || echo NO
+            echo -n "  can create+remove a file here (dry-run touch): "
+            if ( set -o noclobber; : > "$p/.wtest_19383" ) 2>/dev/null; then
+              echo "YES (created $p/.wtest_19383)"; rm -f "$p/.wtest_19383" 2>/dev/null; echo "  (removed)"
+            else echo "NO"; fi
+          done
+          echo
+          echo "=== E. mandatory / revoked consumers (does anything hard-block?) ==="
+          grep -rn "mandatory" $D/services/updates/UpdateCheckService.js | head -30
+          echo "--- gracePeriodMs default ---"
+          grep -n "gracePeriodMs\|GRACE" $D/services/updates/UpdateCheckService.js | head -10
+          echo "--- who consumes mandatory-update / version-revoked outside update services ---"
+          grep -rn "mandatory-update\|version-revoked\|isMandatoryGraceExpired\|updateAvailable" $D --include=*.js | grep -v "services/updates/" | head -20
+          echo
+          echo "=== F. does /health expose update state (operator-visible)? ==="
+          curl -sS -m 8 http://65.108.205.116:3001/api/v1/updates/status | head -c 600; echo
+          echo "--- /api/v1/updates/latest?component=validator ---"
+          curl -sS -m 8 "http://65.108.205.116:3001/api/v1/updates/latest?component=validator" | head -c 600; echo
+          echo
+          echo "=== G. gateway static root dir list (reveals path mapping) ==="
+          ls -la /home/omnirick/OmniBazaar/releases/validator-1.0.14/ 2>&1 | head -8
+          echo "--- is there a symlink /node-software -> releases? ---"
+          ls -ld /home/omnirick/OmniBazaar/Validator/node-software /home/omnirick/OmniBazaar/node-software /opt/node-software 2>&1
+          echo "=== DONE ==="
