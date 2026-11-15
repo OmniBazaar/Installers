@@ -1,0 +1,62 @@
+name: recon-i19406-v2
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: probe
+        run: |
+          set -x
+          H=65.108.205.116
+          S=http://$H:3001
+          RPC="http://$H:9650/ext/bc/B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK/rpc"
+          K=4bl0QeSzU3e_sdlu5NV5qE1tqfOFF2SAChL93-g6OmR7PTfHD7tYuvRUuSKkkxYb
+          O=0x68e79a7bf1e0bc45d0a330c573bc367f9cf464fd326078812f301165fbda4ef1
+          L=0x5e17fc5225d4a099df75359ce1f405503ca79498a8dc46a7d583235a0ee45c16
+          MP=$(printf 'XOM-USD' | xxd -p | tr -d '\n'); MP=${MP}0000000000000000000000000000000000000000000000000000000000000000
+          echo "== health =="
+          curl -sS -m 8 -o /dev/null -w 'health:%{http_code}\n' $S/health || true
+          echo "== mark price (live) =="
+          curl -sS -m 15 -X POST $RPC -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x25d1DcA5909d8106cF54395763d3D221B52af5B5","data":"0x7698aa33584f4d5553440000000000000000000000000000000000000000000000000000"},"latest"]}' || true
+          echo
+          echo "== role matrix =="
+          for a in 0x982557fcd9fbc8bc239c940380c478f584ab0d48 0x44146796ab8a8c796e2a970b61797ac0b1fa72c4 0xa1e8114f119568f544b17e971b8e385d51e6ec94 0x70578755d55734155720295d89e5d5b8a0cb1e53 0xde1292e1d0da189b97e5dcbfa030a5e402748c3a 0xe7cdd15c675594c0b21f9e50c73e6d33288a90d1 0x1eba49e6dd1d52663339ab071bf770f97ffd8a3c 0x021868f2e3d49c059ef52b539aaa933b437e0321; do
+            A=${a#0x}
+            echo -n "$a O="; curl -sS -m 15 -X POST $RPC -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x25d1DcA5909d8106cF54395763d3D221B52af5B5\",\"data\":\"0x91d14854${O#0x}000000000000000000000000${A}\"},\"latest\"]}" || true
+            echo -n " L="; curl -sS -m 15 -X POST $RPC -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"0x25d1DcA5909d8106cF54395763d3D221B52af5B5\",\"data\":\"0x91d14854${L#0x}000000000000000000000000${A}\"},\"latest\"]}" || true
+            echo
+          done
+          echo "== which keys do gateway procs hold =="
+          sudo -n sh -c 'for p in $(pgrep -f "gateway-validator.js"); do echo "-- pid $p"; tr "\0" "\n" < /proc/$p/environ | grep -E "^(PERPS_ORACLE_PRIVATE_KEY|PERPS_LIQUIDATOR_PRIVATE_KEY|VALIDATOR_WALLET_PRIVATE_KEY|INTERNAL_API_KEY)=" ; done' 2>&1 | head -40 || true
+          echo "== marker-A =="; date -u +%FT%TZ
+          for HOSTP in 65.108.205.116 65.108.205.92; do
+            S2=http://$HOSTP:3001
+            echo "##### $HOSTP #####"
+            echo "== T1 anon submit-price =="
+            curl -sS -m 25 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+            echo "== T2 wrong-key =="
+            curl -sS -m 25 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -H 'x-internal-api-key: wrongi19406' -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+            echo "== T3 real-key submit-price (expect on-chain revert: bad proof) =="
+            curl -sS -m 60 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -H "x-internal-api-key: $K" -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+            echo "== T4 real-key submit-price nonexistent market =="
+            curl -sS -m 60 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/submit-price -H 'Content-Type: application/json' -H "x-internal-api-key: $K" -d '{"market":"ZZNOSUCH19406","price":"1","round":"999999","proof":"0x00"}' || true
+            echo "== T5 anon liquidate =="
+            curl -sS -m 25 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/liquidate/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa || true
+            echo "== T6 wrong-key liquidate =="
+            curl -sS -m 25 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/liquidate/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -H 'x-internal-api-key: wrongi19406' || true
+            echo "== T7 real-key liquidate (bogus position) =="
+            curl -sS -m 60 -w '\nHTTP=%{http_code}\n' -X POST $S2/api/v1/perpetual/liquidate/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -H "x-internal-api-key: $K" || true
+          done
+          echo "== T8 real-key submit-price via admin vhost Host header =="
+          curl -sS -m 60 -w '\nHTTP=%{http_code}\n' -X POST http://65.108.205.116:3001/api/v1/perpetual/submit-price -H 'Host: admin.omnibazaar.com' -H 'Content-Type: application/json' -H "x-internal-api-key: $K" -d '{"market":"XOM-USD","price":"1","round":"999999","proof":"0x00"}' || true
+          echo "== marker-B =="; date -u +%FT%TZ
+          echo "== mark price after =="
+          curl -sS -m 15 -X POST $RPC -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x25d1DcA5909d8106cF54395763d3D221B52af5B5","data":"0x7698aa33584f4d5553440000000000000000000000000000000000000000000000000000"},"latest"]}' || true
+          echo
+          echo "== server logs for these attempts =="
+          sudo -n sh -c 'ls -la /home/omnirick/.pm2/logs 2>/dev/null; for f in /home/omnirick/.pm2/logs/*.log; do [ -e "$f" ] || continue; echo "--- $f"; tail -c 400000 "$f" | grep -a -E "Submit mark price failed|Liquidate position failed" | tail -8; done' 2>&1 | tail -60 || true
