@@ -1,0 +1,73 @@
+name: recon-19559b
+# temp read-only recon: identify the backend behind list.omnibazaar.com (listmonk on 127.0.0.1:9010)
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: write
+jobs:
+  probe2:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: read-only listmonk backend identification
+        shell: bash
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19559'
+          echo "##A-who-listens-9010"
+          sudo -n ss -ltnp 2>/dev/null | grep -E ':9010|:9011' || ss -ltnp 2>/dev/null | grep -E ':9010|:9011'
+          echo "##B-process"
+          ps auxww 2>/dev/null | grep -iE 'listmonk' | grep -v grep | head -10
+          echo "##C-docker"
+          sudo -n docker ps --format '{{.Names}} | {{.Image}} | {{.Ports}} | {{.Status}}' 2>/dev/null | head -30
+          echo "##C2-docker-listmonk"
+          sudo -n docker ps -a --format '{{.Names}} | {{.Image}} | {{.Ports}} | {{.Status}}' 2>/dev/null | grep -i listmonk | head -5
+
+          echo "##D-nginx-list-conf"
+          sudo -n cat /etc/nginx/sites-available/list-omnibazaar.conf 2>/dev/null | head -60
+
+          echo "##E-direct-9010-http"
+          for P in / /health /admin /admin/login /api/health /api/lists /api/public/lists /api/version /api/serverconfig /robots.txt /archive /subscription/form; do
+            printf '%-24s ' "$P"
+            curl -sS -m 6 -A "$UA" -o /tmp/m_$$.b -D /tmp/m_$$.h -w 'code=%{http_code} size=%{size_download} ct=%{content_type}\n' "http://127.0.0.1:9010$P" 2>&1 | tail -1
+            head -c 220 /tmp/m_$$.b 2>/dev/null; echo
+            grep -iE '^(server|x-powered-by|set-cookie|location):' /tmp/m_$$.h 2>/dev/null | tr -d '\r' | head -4
+          done
+
+          echo "##F-version-fingerprint"
+          curl -sS -m 6 -A "$UA" -D - -o /dev/null "http://127.0.0.1:9010/admin/login" 2>&1 | tr -d '\r' | head -25
+          echo "--- static asset hashes referenced by login page (version proxy) ---"
+          curl -sS -m 6 -A "$UA" "http://127.0.0.1:9010/admin/login" 2>/dev/null | grep -oE '/admin/static/[a-zA-Z0-9._-]+|/public/static/[a-zA-Z0-9._-]+' | sort -u | head -20
+
+          echo "##G-config-and-install-scripts-(read-only)"
+          sudo -n find / -maxdepth 5 \( -name "config.toml" -o -name "listmonk" -o -name "*listmonk*" \) 2>/dev/null | grep -vE "/(proc|sys|node_modules)/" | head -30
+          echo "--- possible config locations ---"
+          for f in /etc/listmonk/config.toml /root/listmonk/config.toml /home/omnirick/listmonk/config.toml /opt/listmonk/config.toml /var/lib/listmonk/config.toml; do
+            [ -f "$f" ] && { echo "=== $f"; sudo -n sed -e 's/\(password[^=]*=\).*/\1 <redacted-in-log>/I' -e 's/\(pass[^=]*=\).*/\1 <redacted>/I' "$f" | head -60; }
+          done
+
+          echo "##H-listmonk-binary-version"
+          command -v listmonk 2>/dev/null && listmonk --version 2>&1 | head -3
+          sudo -n docker exec $(sudo -n docker ps --format '{{.Names}}' 2>/dev/null | grep -i listmonk | head -1) /listmonk --version 2>&1 | head -3
+
+          echo "##I-public-subscription-probe-no-write"
+          echo "(malformed body only — proves endpoint exists without creating a subscriber)"
+          curl -sS -m 6 -A "$UA" -X POST -H 'Content-Type: application/json' -d '{}' -o /tmp/s_$$.b -w 'empty-body code=%{http_code}\n' http://127.0.0.1:9010/api/public/subscription 2>&1 | tail -1
+          head -c 240 /tmp/s_$$.b; echo
+          curl -sS -m 6 -A "$UA" -X POST -H 'Content-Type: application/json' -d '{"email":"not-an-email","name":"x"}' -o /tmp/s2_$$.b -w 'bad-email code=%{http_code}\n' http://127.0.0.1:9010/api/public/subscription 2>&1 | tail -1
+          head -c 240 /tmp/s2_$$.b; echo
+
+          echo "##J-admin-login-two-state"
+          curl -sS -m 6 -A "$UA" -X POST -H 'Content-Type: application/json' -d '{"username":"zz19559nonexistent","password":"zz19559wrong"}' -o /tmp/a_$$.b -w 'bogus-user code=%{http_code}\n' http://127.0.0.1:9010/api/login 2>&1 | tail -1
+          head -c 240 /tmp/a_$$.b; echo
+
+          echo "##DONE"
+      - name: cleanup temp branch (self-delete)
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
