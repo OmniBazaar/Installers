@@ -44,7 +44,8 @@ runs:
     - name: Install Coin build dependencies
       shell: bash
       working-directory: Coin
-      run: npm ci --no-audit --no-fund
+      # Coin gitignores its package-lock.json, so there is nothing for `npm ci` to pin to.
+      run: npm install --no-audit --no-fund
     - name: Compile the contract artifacts
       shell: bash
       working-directory: Coin
