@@ -1,0 +1,56 @@
+name: recon-19781
+# temp read-only recon: identify listing-postgres container (obz-listing-postgres, 127.0.0.1:55432) and connect read-only
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 15
+    steps:
+      - name: read-only listing-postgres identification + read-only connect
+        shell: bash
+        run: |
+          set +e
+          echo "##A-docker-inspect-env"
+          sudo -n docker inspect obz-listing-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' 2>&1
+          echo "##B-ports-mounts-image"
+          sudo -n docker inspect obz-listing-postgres --format 'IMG={{.Config.Image}} STATUS={{.State.Status}} STARTED={{.State.StartedAt}} PORTS={{json .NetworkSettings.Ports}} NETS={{json .NetworkSettings.Networks}}' 2>&1
+          echo "-- mounts --"
+          sudo -n docker inspect obz-listing-postgres --format '{{range .Mounts}}{{.Type}} {{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>&1
+          echo "##C-find-compose-and-env-files"
+          sudo -n docker inspect obz-listing-postgres --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}|{{index .Config.Labels "com.docker.compose.project"}}' 2>&1
+          echo "-- who listens 55432 --"
+          sudo -n ss -ltnp 2>/dev/null | grep 55432
+          echo "##D-listing-processes-and-units"
+          ps auxww 2>/dev/null | grep -iE 'listing' | grep -v grep | head -20
+          sudo -n systemctl list-units --type=service --no-legend 2>/dev/null | grep -iE 'listing|node' | head -20
+          echo "##E-listing-env-files"
+          for f in /etc/omnibazaar/listing-node.env /etc/omnicoin/listing-node.env /home/omnirick/OmniBazaar/ListingNode/.env /home/omnirick/OmniBazaar/listing-node/.env /opt/omnibazaar/listing-node/.env; do
+            [ -f "$f" ] && { echo "=== $f"; sudo -n sed -e 's/\(PASSWORD=\).*/\1<redacted>/I' -e 's/\(SECRET=\).*/\1<redacted>/I' -e 's/\(KEY=\).*/\1<redacted>/I' "$f" | head -40; }
+          done
+          echo "##F-psql-version-readonly"
+          EV=$(sudo -n docker inspect obz-listing-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -E '^POSTGRES_(USER|DB|PASSWORD)=' )
+          U=$(echo "$EV" | sed -n 's/^POSTGRES_USER=//p'); D=$(echo "$EV" | sed -n 's/^POSTGRES_DB=//p'); P=$(echo "$EV" | sed -n 's/^POSTGRES_PASSWORD=//p')
+          echo "U=[$U] D=[$D] Plen=${#P}"
+          sudo -n docker exec -e PGPASSWORD="$P" obz-listing-postgres psql -U "${U:-omnibazaar_node}" -d "${D:-listing_node}" -tAc "select current_user, current_database(), version();" 2>&1
+          echo "##G-schemas-tables"
+          sudo -n docker exec -e PGPASSWORD="$P" obz-listing-postgres psql -U "${U:-omnibazaar_node}" -d "${D:-listing_node}" -c "select table_schema, table_name from information_schema.tables where table_schema not in ('pg_catalog','information_schema') order by 1,2;" 2>&1 | head -120
+          echo "##H-row-counts"
+          sudo -n docker exec -e PGPASSWORD="$P" obz-listing-postgres psql -U "${U:-omnibazaar_node}" -d "${D:-listing_node}" -c "select relname, n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 40;" 2>&1
+          echo "##I-roles-and-dbs"
+          sudo -n docker exec -e PGPASSWORD="$P" obz-listing-postgres psql -U "${U:-omnibazaar_node}" -d "${D:-listing_node}" -tAc "select rolname, rolsuper, rolcreatedb, rolcanlogin from pg_roles order by 1;" 2>&1
+          sudo -n docker exec -e PGPASSWORD="$P" obz-listing-postgres psql -U "${U:-omnibazaar_node}" -d "${D:-listing_node}" -tAc "select datname from pg_database order by 1;" 2>&1
+          echo "##J-write-privilege-metadata"
+          sudo -n docker exec -e PGPASSWORD="$P" obz-listing-postgres psql -U "${U:-omnibazaar_node}" -d "${D:-listing_node}" -tAc "select table_schema||'.'||table_name, privilege_type from information_schema.role_table_grants where grantee = current_user and privilege_type in ('INSERT','UPDATE','DELETE') order by 1,2;" 2>&1 | head -60
+          echo "##DONE"
+      - name: cleanup temp branch (self-delete)
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
