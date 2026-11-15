@@ -6,6 +6,7 @@
   "workspaces": [
     "WebApp",
     "Validator",
+    "Wallet",
     "packages/*"
   ],
   "scripts": {

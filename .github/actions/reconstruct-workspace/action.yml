@@ -32,6 +32,12 @@ runs:
         repository: OmniBazaar/Packages
         path: packages
         token: ${{ inputs.token }}
+    - name: Checkout Wallet (WebApp compiles its source through the @wallet/* alias)
+      uses: actions/checkout@v4
+      with:
+        repository: OmniBazaar/Wallet
+        path: Wallet
+        token: ${{ inputs.token }}
     - name: Checkout Coin (contract artifacts the Validator compiles against)
       uses: actions/checkout@v4
       with:
