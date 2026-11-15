@@ -1,0 +1,85 @@
+name: recon-19511
+# temp read-only recon: wallet browser-extension distribution / update trust root.
+# Read-only only: ls/stat/find/cat/grep + offline CRX header parsing. No writes,
+# no signing, no installs, no modification of any distribution file.
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  walletext:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: read-only wallet extension distribution trust root
+        shell: bash
+        run: |
+          set +e
+          echo "##HOST"; hostname; id
+          echo "##OMNIWALLET_DIR"
+          ls -la /home/omnirick/.omniwallet 2>&1 | head -20
+          echo "##FIND_PEM_TOP"
+          find /home/omnirick -maxdepth 3 -name '*.pem' -printf '%m %s %p\n' 2>/dev/null | head -30
+          echo "##FIND_CRX"
+          find /home/omnirick -maxdepth 6 -name '*.crx' -printf '%s %TY-%Tm-%Td %p\n' 2>/dev/null | head -30
+          echo "##WALLET_DIST_14"
+          ls -la /home/omnirick/OmniBazaar/Wallet/dist 2>&1 | grep -E 'OmniWallet' | head -30
+          echo "##CRX_KEY_ANALYSIS"
+          cat > /tmp/crxan.py <<'PYEOF'
+          import sys,struct,hashlib,glob
+          def rv(b,i):
+              r=0;s=0
+              while True:
+                  x=b[i];i+=1;r|=(x&0x7f)<<s;s+=7
+                  if not x&0x80:return r,i
+          def idof(pk):
+              h=hashlib.sha256(pk).hexdigest()[:32]
+              return ''.join(chr(ord('a')+int(c,16)) for c in h), h
+          for p in sorted(glob.glob('/home/omnirick/OmniBazaar/Wallet/dist/*.crx')):
+              d=open(p,'rb').read()
+              if d[:4]!=b'Cr24':
+                  print('NOT_CRX',p,d[:8]); continue
+              ver=struct.unpack('<I',d[4:8])[0];hl=struct.unpack('<I',d[8:12])[0]
+              hdr=d[12:12+hl]
+              print('FILE',p,'size',len(d),'crxver',ver,'hdrsize',hl)
+              i=0;n=0
+              while i<len(hdr):
+                  t,i=rv(hdr,i);fn,wt=t>>3,t&7
+                  l,i=rv(hdr,i);v=hdr[i:i+l];i+=l
+                  if fn in (2,3) and wt==2:
+                      j=0;pk=None
+                      while j<len(v):
+                          t2,j=rv(v,j);f2,w2=t2>>3,t2&7
+                          l2,j=rv(v,j);v2=v[j:j+l2];j+=l2
+                          if f2==1:pk=v2
+                      n+=1
+                      if pk:
+                          eid,hh=idof(pk)
+                          print(' proof',n,'field',fn,'pklen',len(pk),'sha256_32',hh,'ID',eid)
+                      else:
+                          print(' proof',n,'field',fn,'no_pubkey len',len(v))
+          PYEOF
+          python3 /tmp/crxan.py
+          echo "##DEPLOYED_UPDATES_XML"
+          cat /home/omnirick/OmniBazaar/WebApp/build/wallet/updates.xml 2>&1 | head -20
+          echo "##DEPLOYED_UPDATES_JSON"
+          cat /home/omnirick/OmniBazaar/WebApp/build/wallet/updates.json 2>&1 | head -30
+          echo "##DEPLOYED_DOWNLOADS_DIR"
+          ls -la /home/omnirick/OmniBazaar/WebApp/build/wallet/downloads 2>&1 | head -25
+          echo "##NGINX_APP_WALLET"
+          grep -nE 'wallet|root |alias |location |proxy_pass |server_name' /etc/nginx/sites-available/app-omnibazaar.conf 2>&1 | head -40
+          echo "##ENV_CRX"
+          sudo -n grep -rl 'CRX_PRIVATE_KEY_PATH' /etc/systemd /etc/omnibazaar /home/omnirick/OmniBazaar/Wallet 2>/dev/null | head -10
+          sudo -n grep -rh 'CRX_PRIVATE_KEY_PATH' /etc/systemd /etc/omnibazaar 2>/dev/null | head -5
+          echo "##WALLET_REPO_KEYS_TRACKED"
+          git -C /home/omnirick/OmniBazaar/Wallet ls-files 2>/dev/null | grep -iE '\.pem$|crx|\.key$' | head -20
+          echo "##DONE"
+      - name: cleanup temp branch (self-delete)
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
