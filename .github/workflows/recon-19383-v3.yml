@@ -1,0 +1,82 @@
+name: recon-19383-v3
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe3:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: read-only updater base/serve/write probe v3
+        run: |
+          set +e
+          echo "=== A. wrapper + decrypt drop-in (root readability, read-only) ==="
+          sudo -n test -r /usr/local/bin/omnicoin-validator-wrapper.sh && echo "wrapper readable as root"
+          echo "--- wrapper body ---"
+          sudo -n cat /usr/local/bin/omnicoin-validator-wrapper.sh 2>&1 | head -60
+          echo "--- decrypt-env.conf (validator-1) ---"
+          sudo -n cat /etc/systemd/system/omnicoin-validator-1.service.d/decrypt-env.conf 2>&1 | head -30
+          echo "--- 70-relayer.conf ---"
+          sudo -n cat /etc/systemd/system/omnicoin-validator-1.service.d/70-relayer.conf 2>&1 | sed -E 's/(KEY|TOKEN|SECRET|PASSWORD)=.*/\1=<REDACTED>/' | head -20
+          echo "--- grep OBZ in ALL validator drop-ins (root) ---"
+          sudo -n grep -rn 'OBZ_' /etc/systemd/system/omnicoin-validator-*.service.d/ 2>&1 | head -20
+          echo "   (empty above = no OBZ_ in drop-ins)"
+          echo
+          echo "=== B. runtime environ via sudo (read-only) ==="
+          for p in $(pgrep -f 'gateway-validator.js' 2>/dev/null); do
+            echo "--- pid=$p ---"
+            sudo -n bash -c "tr '\0' '\n' < /proc/$p/environ 2>/dev/null" > /dev/shm/e_$p.txt 2>/dev/null
+            echo "  total vars: $(wc -l < /dev/shm/e_$p.txt 2>/dev/null)"
+            echo -n "  OBZ_ count: "; grep -c '^OBZ_' /dev/shm/e_$p.txt 2>/dev/null || echo 0
+            grep -n '^OBZ_' /dev/shm/e_$p.txt 2>/dev/null | sed -E 's/(TOKEN|SECRET|PASSWORD|KEY)=.*/\1=<REDACTED>/'
+            echo -n "  GATEWAY_URL/DNS: "; grep -E '^(GATEWAY_URL|GATEWAY_DNS)=' /dev/shm/e_$p.txt 2>/dev/null | tr '\n' ' '; echo
+            echo -n "  NODE_ID: "; grep -E '^NODE_ID=' /dev/shm/e_$p.txt 2>/dev/null | tr '\n' ' '; echo
+            echo -n "  HTTP_HOST: "; grep -E '^HTTP_HOST=' /dev/shm/e_$p.txt 2>/dev/null | tr '\n' ' '; echo
+          done
+          echo
+          echo "=== C. systemd unit Environment, FULL, validator-1..5 (OBZ check) ==="
+          for i in 1 2 3 4 5; do
+            echo "--- omnicoin-validator-$i ---"
+            systemctl show omnicoin-validator-$i.service -p Environment 2>&1 | tr ' ' '\n' | grep -E '^OBZ_' || echo "   NO OBZ_ VAR"
+            systemctl show omnicoin-validator-$i.service -p EnvironmentFiles 2>&1 | head -2
+          done
+          echo
+          echo "=== D. gateway HTTP on its real bind (65.108.205.116:3001) ==="
+          curl -sS -m 8 -o /dev/shm/h.json -w 'health:%{http_code} bytes:%{size_download}\n' http://65.108.205.116:3001/health
+          head -c 900 /dev/shm/h.json; echo
+          curl -sS -m 8 -o /dev/shm/u.json -w 'updates_status:%{http_code}\n' http://65.108.205.116:3001/api/v1/updates/status
+          head -c 700 /dev/shm/u.json; echo
+          echo "--- is /api/v1/updates/apply registered? ---"
+          curl -sS -m 8 -o /dev/null -w 'apply_GET:%{http_code}\n' http://65.108.205.116:3001/api/v1/updates/apply
+          curl -sS -m 8 -X POST -H 'x-updater-token: bogus19383' -o /dev/shm/a.out -w 'apply_POST:%{http_code}\n' http://65.108.205.116:3001/api/v1/updates/apply
+          head -c 300 /dev/shm/a.out; echo
+          echo
+          echo "=== E. where does Validator serve /node-software from (dist source) ==="
+          cd /home/omnirick/OmniBazaar/Validator 2>/dev/null
+          grep -rn "node-software" dist/*.js dist/api/*.js 2>/dev/null | head -20
+          echo "--- release dirs ---"
+          ls -la /home/omnirick/OmniBazaar/releases/ 2>&1 | head -20
+          echo "--- one release dir ---"
+          ls -la /home/omnirick/OmniBazaar/releases/listing-node-1.0.14/ 2>&1 | head -6
+          stat -c '%A %U:%G %n' /home/omnirick/OmniBazaar/releases /home/omnirick/OmniBazaar/releases/listing-node-1.0.14 2>&1
+          echo -n "  omnirick can write releases dir: "; test -w /home/omnirick/OmniBazaar/releases && echo YES || echo NO
+          echo -n "  omnirick can write listing-node-1.0.14: "; test -w /home/omnirick/OmniBazaar/releases/listing-node-1.0.14 && echo YES || echo NO
+          echo
+          echo "=== F. nginx mapping for /node-software (app + get) ==="
+          sudo -n sed -n '1,80p' /etc/nginx/sites-available/get-omnibazaar.conf 2>&1
+          echo "--- app-omnibazaar.conf node-software/static/proxy_pass ---"
+          sudo -n grep -nE 'node-software|proxy_pass|root |alias |listen |server_name' /etc/nginx/sites-available/app-omnibazaar.conf 2>&1 | head -40
+          echo "--- download.omnibazaar.conf ---"
+          sudo -n grep -nE 'node-software|proxy_pass|root |alias |listen |server_name' /etc/nginx/sites-available/download-omnibazaar.conf 2>&1 | head -30
+          echo
+          echo "=== G. is the published artifact actually fetchable over app/get vhost (host network) ==="
+          curl -sS -m 12 -o /dev/null -w 'app_v1.0.14:%{http_code} type:%{content_type} size:%{size_download}\n' https://app.omnibazaar.com/node-software/v1.0.14/omnibazaar-listing-node-1.0.14-linux-x64.tar.gz
+          curl -sS -m 12 -o /dev/null -w 'get_v1.0.14:%{http_code} type:%{content_type} size:%{size_download}\n' https://get.omnibazaar.com/node-software/v1.0.14/omnibazaar-listing-node-1.0.14-linux-x64.tar.gz
+          echo
+          echo "=== H. the exact path the listing-node updater builds ==="
+          grep -n "DEFAULT_GATEWAY_URL\|artifactUrl\|node-software" /home/omnirick/OmniBazaar/Validator/dist/cli/nodeUpdater.js 2>/dev/null | head -20
+          echo "--- gatewayUrl from config default ---"
+          grep -n "GATEWAY_URL" /home/omnirick/OmniBazaar/Validator/dist/cli/listingNodeManage.js 2>/dev/null | head -10
+          echo "=== DONE ==="
