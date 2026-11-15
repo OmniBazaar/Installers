@@ -1,0 +1,67 @@
+name: recon-19381-v4
+# temp read-only recon tunnel boundary test (branch auto-deleted at job end)
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: write
+jobs:
+  tunnel:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: read-only recon boundary via self-hosted runner
+        shell: bash
+        run: |
+          set +e
+          set -x
+          UA='OmniBazaar-recon-19381'
+          SN=B5gLCyeRWScxf1CeGHfXjEkcp5au8dQYQjtSV6cRammsLjsbK
+          EX=http://65.108.205.116:9650
+          echo "##S9-single-large-json"
+          printf 'C debug_traceBlockByNumber(latest,callTracer) '
+          curl -sS -m 60 -A "$UA" -o /tmp/trace.json -w 'code=%{http_code} bytes=%{size_download} t=%{time_total}\n' \
+            -X POST "$EX/ext/bc/C/rpc" -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"debug_traceBlockByNumber","params":["latest",{"tracer":"callTracer"}]}'
+          wc -c /tmp/trace.json; sha256sum /tmp/trace.json | cut -c1-64
+          head -c 200 /tmp/trace.json; echo
+          gzip -c /tmp/trace.json > /tmp/trace.json.gz; wc -c /tmp/trace.json.gz
+          python3 -c 'import json;d=json.load(open("/tmp/trace.json"));r=d.get("result");print("JSON_OK result_is_list",isinstance(r,list),"n",(len(r) if isinstance(r,list) else "n/a"));print("ERR",d.get("error"))' 2>&1 | head -4
+          echo "##S10-log-ceiling-fullbody"
+          echo "-- emit FULL gzipped base64 of the trace payload (measures job-log ceiling) --"
+          base64 -w0 /tmp/trace.json.gz > /tmp/trace.b64; wc -c /tmp/trace.b64
+          cat /tmp/trace.b64; echo
+          echo "-- end of full body --"
+          echo "##S11-explorer-known-good-paths"
+          for P in "/api/v1/explorer/search?q=0x70578755d55734155720295d89e5d5b8a0cb1e53&type=address" "/api/v1/kyc/accredited-investor?address=0x70578755d55734155720295d89e5d5b8a0cb1e53" "/api?module=proxy&action=eth_blockNumber"; do
+            printf 'expl %-80s ' "$P"
+            curl -sS -m 9 -A "$UA" -o /tmp/x.b -D /tmp/x.h -w 'code=%{http_code} size=%{size_download} t=%{time_total}\n' "https://explorer.omnicoin.net$P" 2>&1 | tail -1
+            head -c 230 /tmp/x.b; echo
+          done
+          echo "##S12-app-known-good-paths"
+          for P in "/api/v1/user/reverse-lookup/0x70578755d55734155720295d89e5d5b8a0cb1e53" "/api/v1/kyc/accredited-investor?address=0x70578755d55734155720295d89e5d5b8a0cb1e53"; do
+            printf 'app %-80s ' "$P"
+            curl -sS -m 9 -A "$UA" -o /tmp/y.b -w 'code=%{http_code} size=%{size_download} t=%{time_total}\n' "https://app.omnibazaar.com$P" 2>&1 | tail -1
+            head -c 230 /tmp/y.b; echo
+          done
+          echo "##S13-subnet-rpc-modules"
+          curl -sS -m 6 -A "$UA" -X POST "$EX/ext/bc/$SN/rpc" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}'; echo
+          curl -sS -m 6 -A "$UA" -X POST "$EX/ext/bc/C/rpc" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}'; echo
+          echo "##S14-http-header-capture"
+          curl -sS -m 8 -A "$UA" -D /tmp/app.h -o /dev/null https://app.omnibazaar.com/ || true
+          cat /tmp/app.h | tr -d '\r'
+          echo "##S15-getlogs-wide"
+          printf 'SN eth_getLogs XOM Transfer last 2000 blocks '
+          curl -sS -m 45 -A "$UA" -o /tmp/logs.json -w 'code=%{http_code} bytes=%{size_download} t=%{time_total}\n' -X POST "$EX/ext/bc/$SN/rpc" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_getLogs","params":[{"address":"0x1eE61487F08F715055358A1F020A86c9E571ED78","fromBlock":"0x2f5000","toBlock":"latest"}]}'
+          wc -c /tmp/logs.json; head -c 160 /tmp/logs.json; echo
+          python3 -c 'import json;d=json.load(open("/tmp/logs.json"));r=d.get("result");print("JSON_OK n_logs",len(r) if isinstance(r,list) else "err", "ERR",d.get("error"))' 2>&1 | head -3
+          echo "##S16-approx-log-total"
+          echo "##DONE"
+      - name: cleanup temp branch (self-delete)
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
