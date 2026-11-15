@@ -1,0 +1,82 @@
+name: recon-19383-v2
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: read
+jobs:
+  probe2:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 8
+    steps:
+      - name: read-only updater runtime probe v2
+        run: |
+          set +e
+          T=$(mktemp -d)
+          echo "=== A. EnvironmentFile OBZ grep (counts + lines, redacted) ==="
+          for f in /home/omnirick/OmniBazaar/Validator/.env /home/omnirick/OmniBazaar/Validator/.env.validator-1 /home/omnirick/OmniBazaar/Validator/.env.validator-5; do
+            echo "--- $f ---"
+            stat -c '%A %U:%G %s' "$f" 2>&1
+            echo -n "  OBZ_ count: "; grep -c '^OBZ_' "$f" 2>/dev/null
+            grep -n '^OBZ_' "$f" 2>/dev/null | sed -E 's/(TOKEN|SECRET|PASSWORD|KEY|PRIVATE)=.*/\1=<REDACTED>/'
+            echo -n "  GATEWAY_ count: "; grep -c '^GATEWAY_' "$f" 2>/dev/null
+            grep -n '^GATEWAY_' "$f" 2>/dev/null | sed -E 's/(TOKEN|SECRET)=.*/\1=<REDACTED>/'
+          done
+          echo
+          echo "=== B. runtime /proc/<pid>/environ OBZ_/GATEWAY_ ==="
+          i=0
+          for p in $(pgrep -f 'gateway-validator.js' 2>/dev/null); do
+            i=$((i+1)); E="$T/env_$i.txt"
+            echo "--- pid=$p ---"
+            ( timeout 25 tr '\0' '\n' < /proc/$p/environ 2>/dev/null ) > "$E"
+            echo "  total vars: $(wc -l < "$E")"
+            echo -n "  OBZ_ count: "; grep -c '^OBZ_' "$E"
+            grep -n '^OBZ_' "$E" | sed -E 's/(TOKEN|SECRET|PASSWORD|KEY)=.*/\1=<REDACTED>/'
+            echo -n "  GATEWAY_URL/DNS: "; grep -E '^(GATEWAY_URL|GATEWAY_DNS)=' "$E" | tr '\n' ' '; echo
+            echo -n "  NODE_ID: "; grep -E '^NODE_ID=' "$E" | tr '\n' ' '; echo
+          done
+          echo
+          echo "=== C. systemctl show Environment (validator-1) ==="
+          systemctl show omnicoin-validator-1.service -p Environment 2>&1 | tr ' ' '\n' | grep -E 'OBZ|GATEWAY|PORT|NODE_ID' | sed -E 's/(TOKEN|SECRET|KEY)=.*/\1=<REDACTED>/'
+          echo
+          echo "=== D. /health + updates/status (read-only GET) ==="
+          curl -sS -m 8 http://127.0.0.1:3001/health 2>&1 | head -c 1500; echo
+          curl -sS -m 8 http://127.0.0.1:3001/api/v1/updates/status 2>&1 | head -c 900; echo
+          echo
+          echo "=== E. is /api/v1/updates/apply registered? (bogus token) ==="
+          curl -sS -m 8 -o /dev/null -w 'apply_GET:%{http_code}\n' http://127.0.0.1:3001/api/v1/updates/apply
+          curl -sS -m 8 -X POST -H 'x-updater-token: 0000000000000000000000000000000000000000' -o "$T/apply.out" -w 'apply_POST:%{http_code}\n' http://127.0.0.1:3001/api/v1/updates/apply
+          head -c 300 "$T/apply.out"; echo
+          echo
+          echo "=== F. nginx: where is /node-software served from ==="
+          ls /etc/nginx/sites-enabled/ 2>&1 | head -20
+          grep -rn "node-software" /etc/nginx/ 2>/dev/null
+          echo "--- root/alias lines in enabled sites ---"
+          grep -rhn "root \|alias " /etc/nginx/sites-enabled/ 2>/dev/null | sed 's/^[ \t]*//' | sort -u | head -30
+          echo
+          echo "=== G. candidate node-software dirs ==="
+          for d in /var/www/omnibazaar /var/www/html /var/www /opt/omnicoin-validator /home/omnirick/OmniBazaar/Validator; do
+            echo "--- $d ---"; stat -c '%A %U:%G %n' "$d" 2>&1
+          done
+          find / -maxdepth 5 -type d -name 'node-software' 2>/dev/null | head -5 | while read d; do
+            echo "--- FOUND $d ---"; stat -c '%A %U:%G %n' "$d"; ls -la "$d" 2>&1 | head -12
+            ls -la "$d"/v* 2>&1 | head -10
+          done
+          echo
+          echo "=== H. release layout ==="
+          for d in /opt/omnicoin-validator /opt/omnicoin-service-node; do
+            echo "--- $d ---"; stat -c '%A %U:%G %n' "$d" 2>&1; ls -la "$d" 2>&1 | head -10
+          done
+          echo "--- Validator dir (WorkingDirectory of units) ---"
+          stat -c '%A %U:%G %n' /home/omnirick/OmniBazaar/Validator 2>&1
+          ls -la /home/omnirick/OmniBazaar/Validator/ 2>&1 | head -20
+          echo "--- releases? ---"; ls -la /home/omnirick/OmniBazaar/Validator/releases 2>&1 | head -8
+          echo "--- current? ---"; readlink -f /home/omnirick/OmniBazaar/Validator/current 2>&1
+          echo
+          echo "=== I. published artifacts on disk ==="
+          find / -maxdepth 7 -name 'omnibazaar-validator-*.tar.gz' 2>/dev/null | head -10
+          find / -maxdepth 7 -name 'omnibazaar-listing-node-*.tar.gz' 2>/dev/null | head -10
+          echo
+          echo "=== J. current app version ==="
+          head -8 /home/omnirick/OmniBazaar/Validator/package.json 2>/dev/null
+          echo "=== DONE ==="
