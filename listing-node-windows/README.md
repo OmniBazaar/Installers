@@ -193,3 +193,21 @@ reports the signature as good and the timestamp as failed, which looks like succ
 
 Until the certificate is issued, the published installer is unsigned and SmartScreen
 shows "Windows protected your PC"; that prompt is the honest current state.
+
+## Where the signing material lives (2026-11-15, verified)
+
+| Item | Location / value | Notes |
+| --- | --- | --- |
+| Certificate | **Certum cloud HSM** — no file, ever | Public `.pem`/`.cer` downloads are the certificate only and are NOT needed to sign |
+| Signer identity | `C=VG, L=Road Town, O=Omni Administration Ltd, CN=Omni Administration Ltd`, serial `2985D605A4DB29A8791C7C0B844F4376` | Issued by `CN=Certum Code Signing 2021 CA`, valid to **2027-11-15** |
+| Signing tool (this host) | `~/.cargo/bin/ssign` v0.1.11 | 🛑 The prebuilt Linux binary needs glibc 2.38; Ubuntu 22.04 needs `cargo install ssign --version 0.1.11 --locked`. A stray `~/bin/ssign` shadows it and every attempt fails with a glibc error that looks like an account problem |
+| Verification tool | `osslsigncode` | Always pass `-CAfile /etc/ssl/certs/ca-certificates.crt -TSA-CAfile …`; without them the timestamp silently "fails" and reads as success |
+| Phone / token | SimplySign app (activated) — 6-digit code per signing | Nothing on disk to copy; the account is `omni.administration@gmail.com` |
+| CI path | `Installers/.github/workflows/listing-node-windows.yml`, `signing` environment | `CERTUM_EMAIL` + `CERTUM_OTP` secrets present since 2026-11-15; run **43746786621** built AND signed with no human code |
+| macOS identity | `~/OmniBazaar/apple/devid.p12` + `devid-cert.pem` (Developer ID Application, 2026-11-10), `~/.local/bin/rcodesign` | Notarization path: `macos-notarize-linux.sh`; not yet run for a published mac artifact |
+| Reference | memory `reference_certum_code_signing_certificate.md` | Identity fields, traps, exact commands |
+
+🛑 **Version rule:** an installer's hash must describe *signed* bytes, so the signature goes in
+between `makensis` and the hash (`publish-build.mjs` does this and runs `--verify-signature`).
+The first release that can carry a signed Windows installer is **1.0.16** — 1.0.14 shipped
+unsigned and `listing-node` 1.0.15 was never built.
