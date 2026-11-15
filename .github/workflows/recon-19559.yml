@@ -1,0 +1,79 @@
+name: recon-19559
+# temp read-only recon for list.omnibazaar.com vhost identification (branch auto-deleted at job end)
+on:
+  push:
+    branches: ["recon-*"]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: [self-hosted, wine]
+    timeout-minutes: 10
+    steps:
+      - name: read-only identify list.omnibazaar.com vhost
+        shell: bash
+        run: |
+          set +e
+          UA='OmniBazaar-recon-19559'
+          echo "##A-host"
+          hostname; id; date -u
+          echo "##B-dns"
+          getent hosts list.omnibazaar.com; dig +short list.omnibazaar.com 2>/dev/null || nslookup list.omnibazaar.com 2>/dev/null | tail -5
+
+          echo "##C-nginx-vhosts"
+          for f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*; do
+            [ -f "$f" ] || continue
+            if grep -qi "omnibazaar" "$f" 2>/dev/null; then
+              echo "--- $f ---"
+              grep -nE "server_name|listen|proxy_pass|root |location " "$f" 2>/dev/null | head -40
+            fi
+          done
+          echo "--- direct grep of list.omnibazaar across nginx/traefik/caddy configs ---"
+          grep -rniI "list\.omnibazaar" /etc/nginx /etc/traefik /etc/caddy /home/omnirick/OmniBazaar/Validator 2>/dev/null | head -20
+
+          echo "##D-local-listening-ports"
+          ss -ltnp 2>/dev/null | grep -E ':(3001|3100|3101|3102|3103|3104|8080|5001|9650)' | head -20
+
+          echo "##E-vhost-root-health"
+          for H in list.omnibazaar.com app.omnibazaar.com; do
+            echo "--- Host: $H ---"
+            for P in / /health /api/health; do
+              printf '  HTTP  %-14s ' "$P"
+              curl -sS -m 8 -A "$UA" -o /tmp/l_$$.b -D /tmp/l_$$.h -w 'code=%{http_code} size=%{size_download} ct=%{content_type}\n' \
+                -H "Host: $H" "http://127.0.0.1$P" 2>&1 | tail -1
+              sha256sum /tmp/l_$$.b 2>/dev/null | cut -c1-16
+              head -c 200 /tmp/l_$$.b 2>/dev/null; echo
+            done
+            printf '  HTTPS /health   '
+            curl -sS -m 8 -k -A "$UA" --resolve "$H:443:127.0.0.1" -o /tmp/s_$$.b -w 'code=%{http_code} size=%{size_download} ct=%{content_type}\n' "https://$H/health" 2>&1 | tail -1
+            head -c 200 /tmp/s_$$.b 2>/dev/null; echo
+          done
+
+          echo "##F-candidate-distinct-paths"
+          for P in /api/v1/listings /api/storage/listings /api/search/listings /api/stats/metrics /api/stats/validator /api/v1/node/listings /swagger.json /openapi.json /api/docs /metrics /health; do
+            printf 'list %-28s ' "$P"
+            curl -sS -m 8 -A "$UA" -o /tmp/p_$$.b -w 'code=%{http_code} size=%{size_download} ct=%{content_type}\n' -H "Host: list.omnibazaar.com" "http://127.0.0.1$P" 2>&1 | tail -1
+            head -c 180 /tmp/p_$$.b 2>/dev/null; echo
+          done
+
+          echo "##G-direct-3103-face"
+          for P in /health /api/stats/metrics /api/stats/validator /api/search/listings /api/v1/listings; do
+            printf '3103 %-24s (no auth) ' "$P"
+            curl -sS -m 6 -A "$UA" -o /tmp/q_$$.b -w 'code=%{http_code} size=%{size_download}\n' "http://127.0.0.1:3103$P" 2>&1 | tail -1
+            head -c 200 /tmp/q_$$.b 2>/dev/null; echo
+            printf '3103 %-24s (garbage sig) ' "$P"
+            curl -sS -m 6 -A "$UA" -H 'x-validator-signature: zz-19559-garbage' -o /tmp/r_$$.b -w 'code=%{http_code} size=%{size_download}\n' "http://127.0.0.1:3103$P" 2>&1 | tail -1
+            head -c 200 /tmp/r_$$.b 2>/dev/null; echo
+          done
+
+          echo "##H-three-state-write-probe-(self-controlled, dry description only)"
+          echo "skip-actual-write-in-this-run"
+          echo "##DONE"
+      - name: cleanup temp branch (self-delete)
+        if: always()
+        shell: bash
+        env:
+          TOK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          git push "https://x-access-token:${TOK}@github.com/${GITHUB_REPOSITORY}.git" --delete "${GITHUB_REF_NAME}" 2>&1 || echo "cleanup-failed"
