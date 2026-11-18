@@ -20,7 +20,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 COMPONENT="validator"
 VERSION="${OBZ_VERSION:-latest}"                       # explicit semver or "latest"
 RELEASE_BASE="${OBZ_RELEASE_BASE:-https://get.omnibazaar.com/node-software}"
-WORK_DIR="${OBZ_WORK_DIR:-/tmp/omnibazaar-gateway-install}"
+WORK_DIR="${OBZ_WORK_DIR:-}"   # empty = a private mktemp dir, below
 
 echo -e "${BLUE}=== OmniBazaar Gateway Validator bootstrap ===${NC}"
 
@@ -71,6 +71,15 @@ for tool in curl tar; do
   command -v "$tool" >/dev/null 2>&1 || { echo -e "${RED}Missing required tool: $tool${NC}"; exit 1; }
 done
 
+# A fixed path under /tmp can be pre-created (or symlinked) by a local user, and
+# this script verifies the tarball then extracts it as root. A private 0700
+# directory removes the window: nobody else can swap the file between the check
+# and the extraction.
+if [[ -z "$WORK_DIR" ]]; then
+  WORK_DIR="$(mktemp -d /tmp/omnibazaar-install.XXXXXXXX)"
+  chmod 700 "$WORK_DIR"
+  trap 'rm -rf "$WORK_DIR"' EXIT
+fi
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
@@ -99,6 +108,23 @@ echo "Downloading $TARBALL …"
 curl -fsSL "${RELEASE_BASE}/v${VERSION}/${TARBALL}" -o "$TARBALL"
 echo "Downloading verifier bundle …"
 curl -fsSL "${RELEASE_BASE}/v${VERSION}/${VERIFIER}" -o "$VERIFIER"
+# The verifier is the code that decides whether the release is authentic, and it
+# arrives from the same host as the release. Until its hash is anchored on-chain,
+# pin it here: OBZ_VERIFIER_SHA256=<sha256> makes the script refuse a bundle that
+# does not match the value published in the repository for this version.
+if [[ -n "${OBZ_VERIFIER_SHA256:-}" ]]; then
+  actual="$(sha256sum "$VERIFIER" | awk '{print $1}')"
+  if [[ "$actual" != "${OBZ_VERIFIER_SHA256}" ]]; then
+    echo -e "${RED}✗ Verifier bundle hash mismatch — refusing to run it.${NC}"
+    echo "  expected ${OBZ_VERIFIER_SHA256}"
+    echo "  actual   ${actual}"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Verifier bundle matches the pinned hash${NC}"
+else
+  echo -e "${YELLOW}⚠ OBZ_VERIFIER_SHA256 is not set: the verifier's own integrity is not anchored.${NC}"
+  echo -e "${YELLOW}  Pin it from https://omnibazaar.com/releases before trusting a node install.${NC}"
+fi
 mkdir -p verifier && tar -xzf "$VERIFIER" -C verifier
 
 # ── Verify against on-chain hash (Phase 0 verifier) ──────────────────────
